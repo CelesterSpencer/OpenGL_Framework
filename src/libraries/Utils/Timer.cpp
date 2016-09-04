@@ -6,13 +6,13 @@
 
 void Timer::start()
 {
-    startTime = std::chrono::high_resolution_clock::now();
+    startTime = std::chrono::steady_clock::now();
     endTime = startTime;
 }
 
 void Timer::stop()
 {
-    endTime = std::chrono::high_resolution_clock::now();
+    endTime = std::chrono::steady_clock::now();
     long duration = std::chrono::duration_cast<std::chrono::microseconds>( endTime - startTime ).count();
     durations.push_back(duration);
     totalDuration += duration;
@@ -25,5 +25,10 @@ void Timer::stop()
 
 double Timer::getDuration()
 {
-    return totalDuration / durations.size();
+    double res = 0;
+    for (int i = 0; i < durations.size(); i++) {
+        res += (double)durations.at(i);
+    }
+    return (res/durations.size()) / 1000.0;
+    //return (totalDuration / durations.size()) / 1000.0;
 }

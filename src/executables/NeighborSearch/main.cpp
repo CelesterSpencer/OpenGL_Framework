@@ -49,6 +49,7 @@ glm::vec2                       m_CameraDeltaMovement;
 float                           m_CameraSmoothTime;
 bool                            m_rotateCamera = false;
 PickingTexture                  m_pickingTexture;
+bool                            m_writeToFile = false;
 
 
 // protein
@@ -134,6 +135,8 @@ void colorAtomsInRadius(Neighborhood& neighborhood);
 
 void fillPickingTexture(ShaderProgram pickingProgram);
 void updateGUI();
+
+void writeNeighborhoodSearchPerformanceToFile();
 
 
 
@@ -307,6 +310,11 @@ void keyCallback(int key, int scancode, int action, int mods)
     else if (key == GLFW_KEY_LEFT) {
         if (action == GLFW_PRESS) {
             m_debugOffset--;
+        }
+    }
+    else if (key == GLFW_KEY_SPACE) {
+        if (action == GLFW_PRESS) {
+            m_writeToFile = true;
         }
     }
 }
@@ -564,6 +572,15 @@ void run()
         m_applicationTimer.stop();
 
         /*
+         * writing performance of neighborhood search for
+         * this frame to file
+         */
+        if (m_writeToFile) {
+            writeNeighborhoodSearchPerformanceToFile();
+            m_writeToFile = false;
+        }
+
+        /*
          * draw proteins as impostor
          */
         glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 0, m_atomsSSBO);
@@ -784,7 +801,6 @@ void drawSearchRadius(ShaderProgram searchRadiusProgram)
  */
 void findNeighbors(Neighborhood& neighborhood)
 {
-    m_applicationTimer.start();
 
     if (m_findOnlySelectedAtomsNeighbors) {
         findSelectedAtomsNeighbors(neighborhood, m_selectedAtom);
@@ -792,7 +808,6 @@ void findNeighbors(Neighborhood& neighborhood)
         colorAtomsInRadius(neighborhood);
     }
 
-    m_applicationTimer.stop();
 }
 
 void findSelectedAtomsNeighbors(Neighborhood& neighborhood, int selectedAtomIdx)
@@ -1000,8 +1015,8 @@ void updateGUI()
                     m_gridRes.z != oldGridRes.z) {
                 m_updateNeighborhoodSearch = true;
             }
-            std::string setupTimeText = "Setup time: " + std::to_string(m_runTimer.getDuration()/1000.0) + " ms";
-            std::string searchTimeText = "Neighborhood search time: " + std::to_string(m_applicationTimer.getDuration()/1000.0) + " ms";
+            std::string setupTimeText = "Setup time: " + std::to_string(m_runTimer.getDuration()) + " ms";
+            std::string searchTimeText = "Neighborhood search time: " + std::to_string(m_applicationTimer.getDuration()) + " ms";
             ImGui::Text(setupTimeText.c_str());
             ImGui::Text(searchTimeText.c_str());
             ImGui::Checkbox("Find only neighbors of selected atom", &m_findOnlySelectedAtomsNeighbors);
@@ -1027,6 +1042,22 @@ void updateGUI()
     }
 
     ImGui::Render();
+}
+
+void writeNeighborhoodSearchPerformanceToFile()
+{
+    std::string tab = "\t";
+
+    std::string gridSize  = std::to_string((int)std::cbrt(m_search.getTotalGridNum()));
+    std::string cellCount  = std::to_string(m_search.getTotalGridNum());
+    std::string atomCount = std::to_string(m_proteinLoader.getNumberOfAllAtoms());
+    std::string searchRad = std::to_string(m_searchRadius);
+    std::string setupTime = std::to_string(m_runTimer.getDuration());
+    std::string applTime  = std::to_string(m_applicationTimer.getDuration());
+    std::string totalTime = std::to_string(m_runTimer.getDuration() + m_applicationTimer.getDuration());
+
+    std::string text = gridSize + tab + cellCount + tab + atomCount + tab + searchRad + tab + setupTime + tab + applTime + tab + totalTime + "\n";
+    Logger::instance().writeToFile(text);
 }
 
 
@@ -1071,9 +1102,35 @@ int main()
     setupBuffers();
 
     /*
+     * init file
+     */
+    Logger::instance().openFile("neighborhood_search.m");
+    std::string firstLine;
+    firstLine  = "grid size";
+    firstLine += "\t";
+    firstLine  = "num grid cells";
+    firstLine += "\t";
+    firstLine += "atom count";
+    firstLine += "\t";
+    firstLine += "search radius";
+    firstLine += "\t";
+    firstLine += "setup time";
+    firstLine += "\t";
+    firstLine += "search time";
+    firstLine += "\t";
+    firstLine += "total time";
+    firstLine += "\n";
+    Logger::instance().writeToFile(firstLine);
+
+    /*
      * run application
      */
     run();
+
+    /*
+     * close file
+     */
+    Logger::instance().closeFile();
 
     Logger::instance().tabOut(); Logger::instance().print("Exit Neighborhood search");
 

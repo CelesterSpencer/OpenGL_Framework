@@ -141,7 +141,7 @@ void NeighborhoodSearch::allocateBuffers(uint numElements)
 
     GPUHandler::initSSBO<uint>     (m_gpuBuffers.dp_undx,      numElements);
 
-
+    /*
     glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 2, *m_gpuBuffers.dp_gcell);
     glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 3, *m_gpuBuffers.dp_gndx);
     glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 4, *m_gpuBuffers.dp_gridcnt);
@@ -153,7 +153,7 @@ void NeighborhoodSearch::allocateBuffers(uint numElements)
     glBindBufferBase(GL_SHADER_STORAGE_BUFFER,10, *m_gpuBuffers.dp_tempGcell);
     glBindBufferBase(GL_SHADER_STORAGE_BUFFER,11, *m_gpuBuffers.dp_tempGndx);
     glBindBufferBase(GL_SHADER_STORAGE_BUFFER,12, *m_gpuBuffers.dp_undx);
-
+    */
 }
 void NeighborhoodSearch::deallocateBuffers()
 {

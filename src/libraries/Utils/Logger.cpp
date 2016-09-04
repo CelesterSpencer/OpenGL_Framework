@@ -4,6 +4,29 @@
 
 #include "Logger.h"
 
+void Logger::openFile(std::string filename)
+{
+    std::string fileUrl = RESOURCES_PATH;
+    fileUrl += "/logs/";
+    fileUrl += filename;
+    outputFile.open(fileUrl, std::ios::out);
+}
+
+void Logger::writeToFile(std::string text)
+{
+    if (outputFile.is_open()) {
+        print("Write '" + text + "' to file");
+        outputFile << text;
+    } else {
+        print("File has not been opened before writing", Mode::ERROR);
+    }
+}
+
+void Logger::closeFile()
+{
+    outputFile.close();
+}
+
 void Logger::print(std::string text, Mode mode)
 {
     if (mode & LOG)

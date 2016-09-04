@@ -7,11 +7,14 @@
 
 #include <chrono>
 #include <deque>
+#include <string>
+
+#include "Logger.h"
 
 class Timer {
 public:
-    std::chrono::high_resolution_clock::time_point startTime;
-    std::chrono::high_resolution_clock::time_point endTime;
+    std::chrono::steady_clock::time_point startTime;
+    std::chrono::steady_clock::time_point endTime;
     std::deque<long> durations;
     long totalDuration = 0;
     int limit = 100;

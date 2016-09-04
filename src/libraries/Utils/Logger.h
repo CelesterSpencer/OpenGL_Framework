@@ -7,6 +7,7 @@
 
 #include <string>
 #include <iostream>
+#include <fstream>
 
 class Logger {
 public:
@@ -24,7 +25,12 @@ public:
         ERROR   = (1u << 2)
     };
 
+    void openFile(std::string filename);
+    void writeToFile(std::string text);
+    void closeFile();
+
     void print(std::string text, Mode mode = LOG);
+
     void tabIn();
     void tabOut();
     void changeTab(std::string newTab);
@@ -43,6 +49,8 @@ private:
     std::string tabs = "";
     bool printToFile = false;
     unsigned int filter;
+
+    std::ofstream outputFile;
 };
 
 
