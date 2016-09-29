@@ -1,0 +1,110 @@
+//============================================================================
+// Distributed under the MIT License. Author: Raphael Menges
+//============================================================================
+
+#version 430 core
+
+// ## Workgroup layout
+layout(local_size_x = 64, local_size_y = 1, local_size_z = 1) in;
+
+// ## Image buffer with input indices
+layout(binding = 0, r32ui) restrict readonly uniform uimageBuffer InputIndices;
+
+// ## Radii SSBO
+layout(std430, binding = 1) restrict readonly buffer RadiiBuffer
+{
+   float radii[];
+};
+
+// ## Trajectory SSBO
+struct Position
+{
+    float x,y,z;
+};
+
+layout(std430, binding = 2) restrict readonly buffer TrajectoryBuffer
+{
+   Position trajectory[];
+};
+
+// ## Relative positions of samples SSBO
+layout(std430, binding = 3) restrict readonly buffer RelativePositionBuffer
+{
+   Position relativePosition[];
+};
+
+// ## Image buffer with classification
+layout(binding = 4, r32ui) restrict uniform uimageBuffer Classification;
+
+// ## Atomic counter for surface samples
+layout(binding = 5) uniform atomic_uint SurfaceSampleCount;
+
+// ## Uniforms
+uniform int atomCount;
+uniform int localFrameCount;
+uniform int sampleCount;
+uniform int integerCountPerSample;
+uniform int frame;
+uniform int inputAtomCount;
+uniform float probeRadius;
+uniform int localFrame;
+
+// ## Main function
+void main()
+{
+    // Input buffer index extraction
+    int inputAtomIndicesIndex = int(gl_GlobalInvocationID.x) / sampleCount;
+
+    // Sample index extraction
+    int sampleIndex = int(gl_GlobalInvocationID.x) - (inputAtomIndicesIndex * sampleCount);
+
+    // Check whether in range of input atoms
+    if(inputAtomIndicesIndex >= inputAtomCount) { return; }
+
+    // Check whether in range of samples
+    if(sampleIndex >= sampleCount) { return; }
+
+    // Extract index of atom in AtomBuffer
+    int atomIndex = int(imageLoad(InputIndices, inputAtomIndicesIndex).x);
+
+    // Read position of sample
+    Position atomPosition = trajectory[(frame*atomCount) + atomIndex];
+    Position relativeSamplePosition = relativePosition[(atomIndex * sampleCount) + sampleIndex];
+    vec3 samplePosition = vec3(
+        atomPosition.x + relativeSamplePosition.x,
+        atomPosition.y + relativeSamplePosition.y,
+        atomPosition.z + relativeSamplePosition.z);
+
+    // Go over all other atoms (not only surface atoms) and test whether sample is included
+    for(int i = 0; i < atomCount; i++)
+    {
+        // Do not cut with itself
+        if(i == atomIndex) { continue; }
+
+        // Distance sample and other atom's center
+        Position otherAtomPosition = trajectory[(frame*atomCount) + i];
+        float dist = distance(vec3(otherAtomPosition.x, otherAtomPosition.y, otherAtomPosition.z), samplePosition);
+
+        // Check, whether distance is smaller than extended radius of other atom
+        if(dist <= (radii[i] + probeRadius))
+        {
+            // Sample is internal, the initial zero in classification buffer is ok
+            return;
+        }
+    }
+
+    // When you came to here, set certain bit in classifier to one for indicating that sample is on surface
+    int uintIndex =
+        (atomIndex * sampleCount * integerCountPerSample) // offset for current atom's samples
+        + (sampleIndex *  integerCountPerSample) // offset for current sample's slot
+        + (localFrame / 32); // offset for unsigned int which has to be modified
+    int bitIndex = localFrame - (32 * int(localFrame / 32)); // bit index within unsigned integer
+
+    // Since compute shader called for each frame, no read / write synchronization necessary
+    // Each unsigned int block belongs to single sample and each execution corresponds to unique sample
+    uint value = uint(imageLoad(Classification, uintIndex).x) | (1 << bitIndex);
+    imageStore(Classification, uintIndex, uvec4(value));
+
+    // Increment atomic counter
+    atomicCounterIncrement(SurfaceSampleCount);
+}

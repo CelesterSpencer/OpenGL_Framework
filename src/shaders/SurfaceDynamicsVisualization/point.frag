@@ -1,9 +1,14 @@
+//============================================================================
+// Distributed under the MIT License. Author: Raphael Menges
+//============================================================================
+
 #version 430
 
-flat in vec3 color;
 layout(location = 0) out vec4 fragColor;
+
+uniform vec4 color;
 
 void main()
 {
-    fragColor = vec4(color, 1);
+    fragColor = color;
 }

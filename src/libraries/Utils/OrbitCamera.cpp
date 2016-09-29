@@ -1,3 +1,7 @@
+//============================================================================
+// Distributed under the MIT License. Author: Raphael Menges
+//============================================================================
+
 #include "OrbitCamera.h"
 #include <glm/gtc/matrix_transform.hpp>
 
@@ -50,10 +54,10 @@ void OrbitCamera::update(GLint viewportWidth, GLint viewportHeight, GLboolean pe
 
         // Projection matrix
         mProjectionMatrix = glm::perspective(
-                glm::radians(mFov),
-                (GLfloat)mViewportWidth / (GLfloat)mViewportHeight,
-                0.1f,
-                mMaxRadius * 2.f);
+            glm::radians(mFov),
+            (GLfloat)mViewportWidth / (GLfloat)mViewportHeight,
+            0.1f,
+            mMaxRadius * 2.f);
     }
     else
     {
@@ -71,12 +75,12 @@ void OrbitCamera::update(GLint viewportWidth, GLint viewportHeight, GLboolean pe
         GLfloat halfHeight = ((GLfloat) mViewportHeight) * mOrthoScale * 0.5f;
         mOrthoZoom = glm::max(0.0000001f, (mRadius - mMinRadius) / (mMaxRadius - mMinRadius));
         mProjectionMatrix = glm::ortho(
-                mOrthoZoom * -halfWidth,
-                mOrthoZoom * halfWidth,
-                mOrthoZoom * -halfHeight,
-                mOrthoZoom * halfHeight,
-                0.1f,
-                mMaxRadius * 2.f);
+            mOrthoZoom * -halfWidth,
+            mOrthoZoom * halfWidth,
+            mOrthoZoom * -halfHeight,
+            mOrthoZoom * halfHeight,
+            0.1f,
+            mMaxRadius * 2.f);
     }
 }
 

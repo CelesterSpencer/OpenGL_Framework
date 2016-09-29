@@ -1,76 +1,52 @@
-string(REPLACE "/" ";" p2list "${CMAKE_SOURCE_DIR}")
-string(REPLACE "\\" ";" p2list "${p2list}")
-list(REVERSE p2list)
-list(GET p2list 0 first)
-list(GET p2list 1 ProjectId)
-string(REPLACE " " "_" ProjectId ${ProjectId})
-project(${ProjectId})
-
-include(${CMAKE_MODULE_PATH}/doxygen.cmake)
-include(${CMAKE_MODULE_PATH}/macros.cmake)
-
+# CMake flags
 set(CMAKE_CONFIGURATION_TYPES Debug;Release)
 set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -std=c++0x")
 
+# Link dependencies using CMake modules
 link_dependency(OpenGL3)
 link_dependency(GLEW)
-link_dependency(GLFW3)
-link_dependency(GLM)
 link_dependency(DevIL)
 link_dependency(ASSIMP)
-#link_dependency(ZLIB)
 
 # Include externals folder
 include_directories(${EXTERNALS_PATH})
 
-#set(CMAKE_PREFIX_PATH ${CMAKE_PREFIX_PATH} $ENV{PythonLibs})
-#find_package(PythonLibs 2.7 REQUIRED)  # cant use macro due to version parameter
-#include(${CMAKE_MODULE_PATH}/LinkPythonLibs27.cmake)
+# Include GLM
+include_directories(${SUBMODULESS_PATH}/glm)
 
-if (NOT PYTHON_INCLUDE_DIRS)
-    find_package(PythonLibs 3 REQUIRED)
-endif()
+# Include GLFW
+include_directories(${SUBMODULESS_PATH}/glfw/include)
 
-#link_dependency(NumPy)
-#find_package(NumPy REQUIRED)
+# Add GLFW to linking
+set(ALL_LIBRARIES ${ALL_LIBRARIES} glfw)
 
-include_directories(
-    ${CORE_PATH}
-${PYTHON_INCLUDE_DIRS}
-#${NUMPY_INCLUDE_DIRS}
-)
-link_libraries(
-        ${PYTHON_LIBRARIES}
-)
+# Include directories of python
+include_directories(${PYTHON_INCLUDE_DIRS})
 
+# Link against python
+link_libraries(${PYTHON_LIBRARIES})
 
+# Link against system libraries
 if("${CMAKE_SYSTEM}" MATCHES "Linux")
-	find_package(X11)
-	set(ALL_LIBRARIES ${ALL_LIBRARIES} ${X11_LIBRARIES} Xcursor Xinerama Xrandr Xxf86vm Xi pthread)
+    find_package(X11)
+    set(ALL_LIBRARIES ${ALL_LIBRARIES} ${X11_LIBRARIES} Xcursor Xinerama Xrandr Xxf86vm Xi pthread -ldl -llzma)
 endif()
 
+# Tell application about some paths
 add_definitions(-DSHADERS_PATH="${SHADERS_PATH}")
 add_definitions(-DRESOURCES_PATH="${RESOURCES_PATH}")
-add_definitions(-DMDTRAJ_PATH="${SIDE_PACKAGES_PATH}") # TODO: rename variable on C++ side
+add_definitions(-DPYTHON_PROGRAM_NAME="${MINICONDA3_PATH}/bin/python")
 
+# Compiler settings
 if ("${CMAKE_CXX_COMPILER_ID}" STREQUAL "Clang")
-  # using Clang
+  # nothing to do
 elseif ("${CMAKE_CXX_COMPILER_ID}" STREQUAL "GNU")
   add_definitions(-Wall -Wextra)
 elseif ("${CMAKE_CXX_COMPILER_ID}" STREQUAL "Intel")
-  # using Intel C++
+  # nothing to do
 elseif ("${CMAKE_CXX_COMPILER_ID}" STREQUAL "MSVC")
   add_definitions(/W2)
 endif()
 
-set(LIBRARY_OUTPUT_PATH ${PROJECT_BINARY_DIR}/lib)
-GENERATE_SUBDIRS(ALL_LIBRARIES ${LIBRARIES_PATH} ${PROJECT_BINARY_DIR}/libraries)
-
-set(EXECUTABLE_OUTPUT_PATH ${PROJECT_BINARY_DIR}/bin)
-GENERATE_SUBDIRS(ALL_EXECUTABLES ${EXECUTABLES_PATH} ${PROJECT_BINARY_DIR}/executables)
-
-if(EXISTS ${SHADERS_PATH})
-        add_subdirectory(${SHADERS_PATH})
-endif()
-
+# Printing of python values
 file (COPY "${CMAKE_MODULE_PATH}/gdb_prettyprinter.py" DESTINATION ${PROJECT_BINARY_DIR})

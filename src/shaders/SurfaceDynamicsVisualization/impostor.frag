@@ -1,18 +1,48 @@
+//============================================================================
+// Distributed under the MIT License. Author: Raphael Menges
+//============================================================================
+
 #version 430
 
+// In / out
 in vec2 uv;
 flat in float radius;
 flat in vec3 center;
 flat in vec3 color;
-out vec4 outColor;
-layout (depth_less) out float gl_FragDepth; // Makes optimizations possible
+flat in int index;
+layout(location = 0) out vec4 fragColor;
+layout(location = 1) out vec3 pickIndex;
+out float gl_FragDepth; // No information about less because may not be discared
+                        // before checked whether atom is part of analysis group
+                        // and whether fragment inserted in image for rendering
+                        // group atoms on top of molecule.
 
+// Group indicator
+layout(std430, binding = 2) restrict readonly buffer GroupIndicatorBuffer
+{
+  float groupIndicator[];
+};
+
+// Group rendering texture as image
+layout(binding = 3, rgba32f) restrict coherent uniform image2D GroupRenderingImage;
+
+// Semaphore for group rendering
+layout(binding = 4, r32ui) restrict coherent uniform uimageBuffer GroupRenderingSemaphore;
+
+// Uniforms
+uniform float time;
 uniform mat4 view;
 uniform mat4 projection;
 uniform vec3 cameraWorldPos;
 uniform vec3 lightDir;
 uniform float clippingPlane;
+uniform float depthDarkeningStart;
+uniform float depthDarkeningEnd;
+uniform float highlightMultiplier;
+uniform vec4 highlightColor;
+uniform int framebufferWidth;
 
+// Main function
 void main()
 {
     // Radius in UV space is 1 (therefore the scaling with 2 in geometry shader)
@@ -61,16 +91,18 @@ void main()
     }
 
     // Set depth of pixel by projecting pixel position into clip space
-    if(isClippingPlane)
-    {
-        gl_FragDepth = -0.5f;
-    }
-    else
+    float customDepth = 0.0;
+    if(!isClippingPlane)
     {
         vec4 projPos = projection * view * vec4(worldPos, 1.0);
         float projDepth = projPos.z / projPos.w;
-        gl_FragDepth = (projDepth + 1.0) * 0.5; // gl_FragCoord.z is from 0..1. So go from clip space to viewport space
+        customDepth = (projDepth + 1.0) * 0.5; // gl_FragCoord.z is from 0..1. So go from clip space to viewport space
     }
+    gl_FragDepth = customDepth;
+
+    // Depth darkening
+    float depthDarkening = (-viewPos.z - depthDarkeningStart) / (depthDarkeningEnd - depthDarkeningStart);
+    depthDarkening = 1.0 - clamp(depthDarkening, 0, 1);
 
     // Diffuse lighting (hacked together, not correct)
     vec4 nrmLightDirection = normalize(vec4(lightDir, 0));
@@ -91,8 +123,71 @@ void main()
     }
 
     // Some "ambient" lighting combined with specular
-    vec3 finalColor = mix(color * mix(vec3(0.4, 0.45, 0.5), vec3(1.0, 1.0, 1.0), lighting), vec3(1,1,1), specular);
+    vec3 finalColor = depthDarkening * mix(color * mix(vec3(0.4, 0.45, 0.5), vec3(1.0, 1.0, 1.0), lighting), vec3(1,1,1), specular);
+
+    // Rim lighting
+    finalColor += ((0.75 * lighting) + 0.25) * pow(1.0 - dot(normal, vec3(0,0,1)), 3);
+
+    // Highlight (TODO: is float precision enough to add time with frag coord?)
+    float highlight = (sin((((gl_FragCoord.x + gl_FragCoord.y)* 3.14) / 8.0) +  (8.f * time)) + 1.0) / 2.0;
+    finalColor = mix(finalColor, highlightColor.rgb, highlightColor.a * groupIndicator[index] * 0.5 * highlight * highlightMultiplier);
+
+    // Output group rendering fragment
+    if(groupIndicator[index] > 0)
+    {
+        // Pixel coordinate of current fragment
+        ivec2 pixelCoordinate = ivec2(gl_FragCoord.x, gl_FragCoord.y);
+
+        // Depth of current fragment
+        float groupRenderingDepth = 1.0 - customDepth; // inverse depth since texture is initialized with zero and would be already at near plane
+
+        // Get linear coordinate in semaphore
+        int semaphoreCoordinate = (framebufferWidth * pixelCoordinate.y) + pixelCoordinate.x;
+
+        // Write value to image
+        uint locked = 0u;
+        bool done = false;
+        int iteration = 0;
+        while(!done && iteration < 10)
+        {
+            // Try to lock
+            locked = imageAtomicExchange(GroupRenderingSemaphore, semaphoreCoordinate, 1u);
+
+            // Proceed if successful
+            if(locked == 0u)
+            {
+                // Fetch current depth value from image and decide whether to overwrite stored value
+                float prevGoupRenderingDepth = float(imageLoad(GroupRenderingImage, pixelCoordinate).a);
+                if(prevGoupRenderingDepth < groupRenderingDepth)
+                {
+                   imageStore(GroupRenderingImage, pixelCoordinate, vec4(finalColor.rgb, groupRenderingDepth));
+                }
+
+                memoryBarrier(); // guarantee that value is written to image
+
+                // Reset semaphore
+                imageAtomicExchange(GroupRenderingSemaphore, semaphoreCoordinate, 0u);
+
+                // Mark as done for this execution
+                done = true;
+            }
+            else
+            {
+                iteration++;
+            }
+        }
+    }
 
     // Output color
-    outColor = vec4(finalColor, 1);
+    fragColor = vec4(finalColor, 1);
+
+    // Output pickIndex
+    int rawPickIndex = index + 1; // add one to distinguish from nothing
+    int r = (rawPickIndex & 0x000000FF) >>  0;
+    int g = (rawPickIndex & 0x0000FF00) >>  8;
+    int b = (rawPickIndex & 0x00FF0000) >> 16;
+    pickIndex = vec3(
+        float(r) / 255.0,
+        float(g) / 255.0,
+        float(b) / 255.0);
 }
