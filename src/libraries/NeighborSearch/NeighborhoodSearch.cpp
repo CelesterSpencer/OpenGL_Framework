@@ -157,7 +157,7 @@ void NeighborhoodSearch::allocateBuffers(uint numElements)
 }
 void NeighborhoodSearch::deallocateBuffers()
 {
-    GPUHandler::deleteSSBO(m_gpuBuffers.dp_pos);
+    //GPUHandler::deleteSSBO(m_gpuBuffers.dp_pos);
     GPUHandler::deleteSSBO(m_gpuBuffers.dp_gcell);
     GPUHandler::deleteSSBO(m_gpuBuffers.dp_gndx);
     GPUHandler::deleteSSBO(m_gpuBuffers.dp_gridcnt);
