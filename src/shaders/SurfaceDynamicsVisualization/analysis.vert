@@ -5,7 +5,7 @@
 #version 430
 
 // Color and radius of impostor
-out vec3 vertColor;
+out vec4 vertColor;
 out float vertRadius;
 
 // Index of atom
@@ -50,7 +50,7 @@ uniform float smoothAnimationMaxDeviation;
 uniform int frameCount;
 uniform int groupAtomCount;
 uniform vec3 selectionColor;
-uniform int ascensionFrame;
+uniform int localFrame;
 uniform float ascensionChangeRadiusMultiplier;
 
 // Global
@@ -107,7 +107,7 @@ void main()
     gl_Position = vec4(center, 1);
 
     // Extract radius inclusive visualization of ascension angle
-    float angle = ascension[(ascensionFrame * atomCount) + int(atomIndex)];
+    float angle = ascension[(localFrame * atomCount) + int(atomIndex)];
     float originalRadius = radii[atomIndex] + probeRadius;
     vertRadius =
     originalRadius
@@ -128,15 +128,15 @@ void main()
     // Set color
     if(atomIndex == selectedIndex)
     {
-        vertColor = selectionColor;
+        vertColor = vec4(selectionColor, 1);
     }
     else if(inGroup)
     {
-        vertColor = vec3(1, 1, 0);
+        vertColor = vec4(1, 1, 0, 1);
     }
     else
     {
-        vertColor = vec3(0.2, 0.2, 0.2);
+        vertColor = vec4(0.2, 0.2, 0.2, 1);
     }
 
     // Set index

@@ -17,6 +17,9 @@ include_directories(${SUBMODULESS_PATH}/glm)
 # Include GLFW
 include_directories(${SUBMODULESS_PATH}/glfw/include)
 
+# Include Simple-FFT
+include_directories(${SUBMODULESS_PATH}/Simple-FFT/include)
+
 # Add GLFW to linking
 set(ALL_LIBRARIES ${ALL_LIBRARIES} glfw)
 
@@ -35,17 +38,17 @@ endif()
 # Tell application about some paths
 add_definitions(-DSHADERS_PATH="${SHADERS_PATH}")
 add_definitions(-DRESOURCES_PATH="${RESOURCES_PATH}")
-add_definitions(-DPYTHON_PROGRAM_NAME="${MINICONDA3_PATH}/bin/python")
+add_definitions(-DPYTHON_BINARY="${MINICONDA3_PATH}/bin/python") # TODO: move to cmake GUI
 
 # Compiler settings
 if ("${CMAKE_CXX_COMPILER_ID}" STREQUAL "Clang")
-  # nothing to do
+    # nothing to do
 elseif ("${CMAKE_CXX_COMPILER_ID}" STREQUAL "GNU")
-  add_definitions(-Wall -Wextra)
+    add_definitions(-Wall -Wextra)
 elseif ("${CMAKE_CXX_COMPILER_ID}" STREQUAL "Intel")
-  # nothing to do
+    # nothing to do
 elseif ("${CMAKE_CXX_COMPILER_ID}" STREQUAL "MSVC")
-  add_definitions(/W2)
+    add_definitions(/W2)
 endif()
 
 # Printing of python values

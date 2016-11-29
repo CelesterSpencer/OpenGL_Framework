@@ -4,9 +4,6 @@
 
 #version 430
 
-// Definitions
-const float TWO_PI = 2.0 * 3.14159265359;
-
 // Color and radius of impostor
 out vec4 vertColor;
 out float vertRadius;
@@ -31,11 +28,35 @@ layout(std430, binding = 1) restrict readonly buffer TrajectoryBuffer
    Position trajectory[];
 };
 
-// Ascension (angle for determining hue)
+// Ascension
 layout(std430, binding = 5) restrict readonly buffer AscensionBuffer
 {
    float ascension[];
 };
+
+// Coloring
+struct Color
+{
+    float r,g,b;
+};
+
+layout(std430, binding = 6) restrict readonly buffer ColoringBuffer
+{
+   Color coloring[];
+};
+
+// Amino acid mapping. Maps atom index to amino acid index
+layout(std430, binding = 7) restrict readonly buffer MappingBuffer
+{
+   unsigned int mapping[];
+};
+
+// Storing layers delta for computed frames for all amino acids
+layout(std430, binding = 8) restrict readonly buffer LayersDeltaBuffer
+{
+   float layersDelta[];
+};
+
 
 // Uniforms
 uniform float probeRadius;
@@ -45,9 +66,9 @@ uniform int atomCount;
 uniform int smoothAnimationRadius;
 uniform float smoothAnimationMaxDeviation;
 uniform int frameCount;
-uniform int localFrame;
-uniform float ascensionColorOffsetAngle;
 uniform vec3 selectionColor;
+uniform int localFrame;
+uniform int localFrameCount;
 uniform float ascensionChangeRadiusMultiplier;
 
 // Global
@@ -76,6 +97,7 @@ void accumulateCenter(
 // Main function
 void main()
 {
+
     // Extract center at frame which is given. Unlike hull shader, here are atom indices directly given by vertex id
     atomIndex = int(gl_VertexID); // write it to global variable
     Position position = trajectory[(frame*atomCount) + atomIndex];
@@ -103,10 +125,8 @@ void main()
     vec3 center = (accCenters + centerAtFrame) / (accCount + 1);
     gl_Position = vec4(center, 1);
 
-    // Extract ascension angle
+    // Extract radius inclusive visualization of ascension angle
     float angle = ascension[(localFrame * atomCount) + int(atomIndex)];
-
-    // Extract radius
     float originalRadius = radii[atomIndex] + probeRadius;
     vertRadius =
     originalRadius
@@ -120,47 +140,11 @@ void main()
     }
     else
     {
-        // Determine angle in hue by adding the given offset
-        float hueAngle = angle + ascensionColorOffsetAngle;
-        float h = mod(hueAngle, TWO_PI);
-        float s = 1.0;
-        float v = 1.0;
-
-        // Get color from angle
-        float hDegree = (h / TWO_PI) * 360.0;
-        float c = v * s;
-        float x = c * (1-abs(mod(hDegree / 60.0, 2.0) - 1.0));
-        float m = v - c;
-
-        // Set color
-        vec3 color;
-        if(0.0 <= hDegree && hDegree < 60.0)
-        {
-            color = vec3(c, x, 0);
-        }
-        else if(60.0 <= hDegree && hDegree < 120.0)
-        {
-            color = vec3(x, c, 0);
-        }
-        else if(120.0 <= hDegree && hDegree < 180.0)
-        {
-            color = vec3(0, c, x);
-        }
-        else if(180.0 <= hDegree && hDegree < 240.0)
-        {
-            color = vec3(0, x, c);
-        }
-        else if(240.0 <= hDegree && hDegree < 300.0)
-        {
-            color = vec3(x, 0, c);
-        }
-        else if(300.0 <= hDegree && hDegree < 360.0)
-        {
-            color = vec3(c, 0, x);
-        }
-        color += m;
-
-        vertColor = vec4(color, 1);
+        // Color from amino acid and alpha from delta
+        unsigned int aminoAcidIndex = mapping[atomIndex];
+        float delta = layersDelta[(aminoAcidIndex * localFrameCount) + localFrame];
+        delta = sqrt(delta); // looks better?
+        vertColor = vec4(coloring[atomIndex].r, coloring[atomIndex].g, coloring[atomIndex].b, delta);
     }
 
     // Set index

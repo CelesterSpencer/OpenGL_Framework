@@ -6,6 +6,9 @@
 #include "Molecule/MDtrajLoader/Data/Protein.h"
 #include "Molecule/MDtrajLoader/Data/AtomLUT.h"
 
+// TODO: Testing
+#include <iostream>
+
 GPUProtein::GPUProtein(Protein * const pProtein)
 {
     // Create structures for CPU
@@ -27,8 +30,8 @@ GPUProtein::GPUProtein(Protein * const pProtein)
 
     // Reserve space in other vectors (which are all assumed to be empty)
     mCentersOfMass.reserve(frameCount);
-    mElements.reserve(atomCount);
-    mAminoacids.reserve(atomCount);
+    mElementNames.reserve(atomCount);
+    mAminoAcidsNames.reserve(atomCount);
 
     // Fill radii, elements and aminoacids on CPU
     mMinCoordinates = glm::vec3(
@@ -45,10 +48,10 @@ GPUProtein::GPUProtein(Protein * const pProtein)
         mspRadii->push_back(pProtein->getRadiusAt(i));
 
         // Element
-        mElements.push_back(pProtein->getAtomAt(i)->getElement());
+        mElementNames.push_back(pProtein->getAtomAt(i)->getElement());
 
         // Aminoacid
-        mAminoacids.push_back(pProtein->getAtomAt(i)->getAmino());
+        mAminoAcidsNames.push_back(pProtein->getAtomAt(i)->getAmino());
 
         // Update min / max coordinate values
         glm::vec3 position = pProtein->getAtomAt(i)->getPosition();
@@ -80,9 +83,6 @@ GPUProtein::GPUProtein(Protein * const pProtein)
         mCentersOfMass.push_back(accPosition / atomCount);
     }
 
-    // Init SSBOs
-    initSSBOs(atomCount, frameCount);
-
     // Extract amino acids (here should be const pointers :( )
     std::vector<std::string>* pAminoAcids = pProtein->getAminoNames();
 
@@ -101,6 +101,9 @@ GPUProtein::GPUProtein(Protein * const pProtein)
 
         mAminoAcids.push_back(AminoAcid(name, minIndex, maxIndex));
     }
+
+    // Init SSBOs
+    initSSBOs(atomCount, frameCount);
 }
 
 GPUProtein::GPUProtein(const std::vector<glm::vec4>& rAtoms)
@@ -153,9 +156,14 @@ void GPUProtein::bindColorsElement(GLuint slot) const
     mColorsElementBuffer.bind(slot);
 }
 
-void GPUProtein::bindColorsAminoacid(GLuint slot) const
+void GPUProtein::bindColorsAminoAcid(GLuint slot) const
 {
     mColorsAminoacidBuffer.bind(slot);
+}
+
+void GPUProtein::bindAminoAcidMapping(GLuint slot) const
+{
+    mAminoAcidMappingBuffer.bind(slot);
 }
 
 std::shared_ptr<const std::vector<float> > GPUProtein::getRadii() const
@@ -190,7 +198,7 @@ void GPUProtein::initSSBOs(int atomCount, int frameCount)
     elementColors.reserve(atomCount);
     for(int i = 0; i < atomCount; i++)
     {
-        auto color = lut.cpk_colorcode[mElements.at(i)];
+        auto color = lut.cpk_colorcode[mElementNames.at(i)];
         elementColors.push_back(glm::vec3(color.r, color.g, color.b));
     }
     mColorsElementBuffer.fill(elementColors, GL_STATIC_DRAW);
@@ -200,9 +208,26 @@ void GPUProtein::initSSBOs(int atomCount, int frameCount)
     aminoacidColors.reserve(atomCount);
     for(int i = 0; i < atomCount; i++)
     {
-        auto color = lut.fetchAminoColor(mAminoacids.at(i));
+        auto color = lut.fetchAminoColor(mAminoAcidsNames.at(i));
         aminoacidColors.push_back(glm::vec3(color.r, color.g, color.b));
     }
     mColorsAminoacidBuffer.fill(aminoacidColors, GL_STATIC_DRAW);
+
+    // Create structure for mapping from atom index to amino acid
+    std::vector<GLuint> aminoAcidMapping;
+    aminoAcidMapping.resize(atomCount, 0);
+    int aminoIndex = 0;
+    for(const AminoAcid& rAminoAcid : mAminoAcids)
+    {
+        // Use start and end index in structure to calculate mapping
+        for(int i = rAminoAcid.startIndex; i <= rAminoAcid.endIndex; i++)
+        {
+            aminoAcidMapping.at(i) = aminoIndex;
+        }
+
+        // Increment index of amino acid
+        aminoIndex++;
+    }
+    mAminoAcidMappingBuffer.fill(aminoAcidMapping, GL_STATIC_DRAW);
 }
 

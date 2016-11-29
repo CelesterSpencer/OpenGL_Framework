@@ -26,7 +26,7 @@ namespace csv = ::text::csv;
 
 SurfaceDynamicsVisualization::SurfaceDynamicsVisualization(std::string filepathPDB, std::string filepathXTC)
 {
-    std::cout << "Welcome to Surface Dynamics Visualization!" << std::endl;
+    Logger::instance().print("Welcome to Surface Dynamics Visualization!");
 
     // # Setup members
     mCameraDeltaRotation = glm::vec2(0,0);
@@ -48,12 +48,12 @@ SurfaceDynamicsVisualization::SurfaceDynamicsVisualization(std::string filepathP
     resetPath(mAminoAcidAnalysisInverseAvgLayersDeltaFilePath, "/AminoAcidAnalysis-inverseAverageLayersDelta.csv");
 
     // Create window (which initializes OpenGL)
-    std::cout << "Create window.." << std::endl;
+    Logger::instance().print("Create window..");
     mpWindow = generateWindow(mWindowTitle, mWindowWidth, mWindowHeight);
-    std::cout << "..done" << std::endl;
+    Logger::instance().print("..done");
 
     // Init ImGui and load font
-    std::cout << "Load GUI.." << std::endl;
+    Logger::instance().print("Load GUI..");
     ImGui_ImplGlfwGL3_Init(mpWindow, true);
     ImGuiIO& io = ImGui::GetIO();
     std::string fontpath = std::string(RESOURCES_PATH) + "/fonts/dejavu-fonts-ttf-2.35/ttf/DejaVuSans.ttf";
@@ -73,7 +73,7 @@ SurfaceDynamicsVisualization::SurfaceDynamicsVisualization(std::string filepathP
         0
     }; // has to be static to be available during run
     io.Fonts->AddFontFromFileTTF(fontpath.c_str(), 16, &config, ranges);
-    std::cout << "..done" << std::endl;
+    Logger::instance().print("..done");
 
     // Clear color (has to be zero for sake of framebuffers)
     glClearColor(0.0f, 0.0f, 0.0f, 0.0f);
@@ -113,17 +113,17 @@ SurfaceDynamicsVisualization::SurfaceDynamicsVisualization(std::string filepathP
     // # Load molecule
 
     // Loading molecule
-    std::cout << "Import molecule.." << std::endl;
+    Logger::instance().print("Import molecule..");
     MdTrajWrapper mdwrap;
     std::vector<std::string> paths;
     paths.push_back(mPDBFilepath);
     if(!mXTCFilepath.empty()) { paths.push_back(mXTCFilepath); }
     std::unique_ptr<Protein> upProtein = std::move(mdwrap.load(paths));
     mupGPUProtein = std::unique_ptr<GPUProtein>(new GPUProtein(upProtein.get()));
-    std::cout << "..done" << std::endl;
+    Logger::instance().print("..done");
 
     // # Prepare framebuffers for rendering
-    std::cout << "Create framebuffer.." << std::endl;
+    Logger::instance().print("Create framebuffer..");
     mupMoleculeFramebuffer = std::unique_ptr<Framebuffer>(new Framebuffer(mWindowWidth, mWindowHeight, mSuperSampling));
     mupMoleculeFramebuffer->bind();
     mupMoleculeFramebuffer->addAttachment(Framebuffer::ColorFormat::RGBA); // color
@@ -137,10 +137,10 @@ SurfaceDynamicsVisualization::SurfaceDynamicsVisualization(std::string filepathP
     mupOverlayFramebuffer->bind();
     mupOverlayFramebuffer->addAttachment(Framebuffer::ColorFormat::RGBA);
     mupOverlayFramebuffer->unbind();
-    std::cout << "..done" << std::endl;
+    Logger::instance().print("..done");
 
     // # Prepare background cubemaps
-    std::cout << "Load cubemaps.." << std::endl;
+    Logger::instance().print("Load cubemaps..");
     mScientificCubemapTexture = createCubemapTexture(
         std::string(RESOURCES_PATH) + "/cubemaps/Scientific/posx.png",
         std::string(RESOURCES_PATH) + "/cubemaps/Scientific/negx.png",
@@ -164,10 +164,19 @@ SurfaceDynamicsVisualization::SurfaceDynamicsVisualization(std::string filepathP
         std::string(RESOURCES_PATH) + "/cubemaps/NissiBeach/negy.jpg",
         std::string(RESOURCES_PATH) + "/cubemaps/NissiBeach/posz.jpg",
         std::string(RESOURCES_PATH) + "/cubemaps/NissiBeach/negz.jpg");
-    std::cout << "..done" << std::endl;
+
+    mWhiteCubemapTexture = createCubemapTexture(
+        std::string(RESOURCES_PATH) + "/textures/white.png",
+        std::string(RESOURCES_PATH) + "/textures/white.png",
+        std::string(RESOURCES_PATH) + "/textures/white.png",
+        std::string(RESOURCES_PATH) + "/textures/white.png",
+        std::string(RESOURCES_PATH) + "/textures/white.png",
+        std::string(RESOURCES_PATH) + "/textures/white.png");
+
+    Logger::instance().print("..done");
 
     // # Create camera
-    std::cout << "Create camera.." << std::endl;
+    Logger::instance().print("Create camera..");
     glm::vec3 cameraCenter = (mupGPUProtein->getMinCoordinates() + mupGPUProtein->getMaxCoordinates()) / 2.f;
     glm::vec3 maxAbsCoordinates(
         glm::max(glm::abs(mupGPUProtein->getMinCoordinates().x), glm::abs(mupGPUProtein->getMaxCoordinates().x)),
@@ -184,17 +193,17 @@ SurfaceDynamicsVisualization::SurfaceDynamicsVisualization(std::string filepathP
             8.f * cameraRadius,
             45.f,
             0.1f));
-    std::cout << "..done" << std::endl;
+    Logger::instance().print("..done");
 
     // # Surface extraction
-    std::cout << "Prepare surface extraction.." << std::endl;
+    Logger::instance().print("Prepare surface extraction..");
 
     // Construct GPUSurfaceExtraction object after OpenGL has been initialized
     mupGPUSurfaceExtraction = std::unique_ptr<GPUSurfaceExtraction>(new GPUSurfaceExtraction);
-    std::cout << "..done" << std::endl;
+    Logger::instance().print("..done");
 
     // # Analysis
-    std::cout << "Prepare analysis.." << std::endl;
+    Logger::instance().print("Prepare analysis..");
 
     // Create path for analysis group
     mupPath = std::unique_ptr<Path>(new Path());
@@ -208,36 +217,51 @@ SurfaceDynamicsVisualization::SurfaceDynamicsVisualization(std::string filepathP
 
     // Create empty outline atoms indices after OpenGL initialization
     mupOutlineAtomIndices = std::unique_ptr<GPUTextureBuffer>(new GPUTextureBuffer(0)); // create empty outline atom indices buffer
-    std::cout << "..done" << std::endl;
+    Logger::instance().print("..done");
 
     // # Ascension
-    std::cout << "Prepare ascension.." << std::endl;
+    Logger::instance().print("Prepare ascension..");
 
     // Ascension
     mupAscension = std::unique_ptr<GPUBuffer<GLfloat> >(new GPUBuffer<GLfloat>);
-    std::cout << "..done" << std::endl;
+    Logger::instance().print("..done");
 
     // # Validation
-    std::cout << "Prepare validation.." << std::endl;
+    Logger::instance().print("Prepare validation..");
 
     // Prepare validation of the surface
     mupSurfaceValidation = std::unique_ptr<SurfaceValidation>(new SurfaceValidation());
-    std::cout << "..done" << std::endl;
+    Logger::instance().print("..done");
 
     // # Group rendering texture and semaphore
-    glGenTextures(1, &mGroupRenderingTexture);
-    glBindTexture(GL_TEXTURE_2D, mGroupRenderingTexture);
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
-    std::vector<GLfloat> emptyData(mupMoleculeFramebuffer->getWidth() * mupMoleculeFramebuffer->getHeight() * 4, 0.f);
-    glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA32F, mupMoleculeFramebuffer->getWidth(), mupMoleculeFramebuffer->getHeight(), 0, GL_RGBA, GL_FLOAT, &emptyData[0]);
-    glBindTexture(GL_TEXTURE_2D, 0);
+    Logger::instance().print("Prepare group rendering..");
+    mupGroupRenderingTexture = std::unique_ptr<GPURenderTexture>(
+        new GPURenderTexture(
+            mupMoleculeFramebuffer->getWidth(),
+            mupMoleculeFramebuffer->getHeight(),
+            GPURenderTexture::Type::RGBA32F));
     std::vector<GLuint> emptyDataSemaphore(mupMoleculeFramebuffer->getWidth() * mupMoleculeFramebuffer->getHeight(), 0.f);
     mupGroupRenderingSemaphore = std::unique_ptr<GPUTextureBuffer>(new GPUTextureBuffer(emptyDataSemaphore));
+    Logger::instance().print("..done");
+
+    // # Prepare residue proximity rendering
+    Logger::instance().print("Prepare residue proximity rendering..");
+    mupKBufferTexture = std::unique_ptr<GPURenderTexture>(
+        new GPURenderTexture(
+            mupMoleculeFramebuffer->getWidth(),
+            mupMoleculeFramebuffer->getHeight(),
+            GPURenderTexture::Type::RG32F,
+            mKBufferLayerCount));
+    mupKBufferCounter = std::unique_ptr<GPURenderTexture>(
+        new GPURenderTexture(
+            mupMoleculeFramebuffer->getWidth(),
+            mupMoleculeFramebuffer->getHeight(),
+            GPURenderTexture::Type::R32UI));
+    mupLayersDeltaBuffer = std::unique_ptr<GPUBuffer<GLfloat> >(new GPUBuffer<GLfloat>());
+    Logger::instance().print("..done");
 
     // # Ascension helper texture
+    Logger::instance().print("Prepare ascension helper..");
     glGenTextures(1, &mAscensionHelperTexture);
     glBindTexture(GL_TEXTURE_2D, mAscensionHelperTexture);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
@@ -256,6 +280,8 @@ SurfaceDynamicsVisualization::SurfaceDynamicsVisualization(std::string filepathP
     stbi_image_free(pData);
     glBindTexture(GL_TEXTURE_2D, 0);
 
+    Logger::instance().print("..done");
+
     // # Other
 
     // Set endframe in GUI to maximum number
@@ -264,27 +290,25 @@ SurfaceDynamicsVisualization::SurfaceDynamicsVisualization(std::string filepathP
 
 SurfaceDynamicsVisualization::~SurfaceDynamicsVisualization()
 {
-    std::cout << "Clean up.." << std::endl;
+    Logger::instance().print("Clean up..");
 
     // Delete cubemaps
     glDeleteTextures(1, &mScientificCubemapTexture);
     glDeleteTextures(1, &mCVCubemapTexture);
     glDeleteTextures(1, &mBeachCubemapTexture);
-
-    // Delete group rendering texture
-    glDeleteTextures(1, &mGroupRenderingTexture);
+    glDeleteTextures(1, &mWhiteCubemapTexture);
 
     // Delete ascension helper texture
     glDeleteTextures(1, &mAscensionHelperTexture);
 
-    std::cout << "..done" << std::endl;
+    Logger::instance().print("..done");
 
-    std::cout << "Goodbye!" << std::endl;
+    Logger::instance().print("Goodbye!");
 }
 
 void SurfaceDynamicsVisualization::renderLoop()
 {
-    std::cout << "Prepare rendering loop.." << std::endl;
+    Logger::instance().print("Prepare rendering loop..");
 
     // Setup OpenGL
     glEnable(GL_DEPTH_TEST);
@@ -329,6 +353,8 @@ void SurfaceDynamicsVisualization::renderLoop()
     ShaderProgram analysisProgram("/SurfaceDynamicsVisualization/analysis.vert", "/SurfaceDynamicsVisualization/impostor.geom", "/SurfaceDynamicsVisualization/impostor.frag");
     ShaderProgram fallbackProgram("/SurfaceDynamicsVisualization/fallback.vert", "/SurfaceDynamicsVisualization/impostor.geom", "/SurfaceDynamicsVisualization/impostor.frag");
     ShaderProgram selectionProgram("/SurfaceDynamicsVisualization/selection.vert", "/SurfaceDynamicsVisualization/impostor.geom", "/SurfaceDynamicsVisualization/impostor.frag");
+    ShaderProgram residueRSPPeelProgram("/SurfaceDynamicsVisualization/rsp-peel.vert", "/SurfaceDynamicsVisualization/impostor.geom", "/SurfaceDynamicsVisualization/rsp-peel.frag");
+    ShaderProgram residueRSPResolveProgram("/SurfaceDynamicsVisualization/screenfilling.vert", "/SurfaceDynamicsVisualization/screenfilling.geom", "/SurfaceDynamicsVisualization/rsp-resolve.frag");
 
     // Shader program to mark surface atoms
     ShaderProgram surfaceMarksProgram("/SurfaceDynamicsVisualization/point.vert", "/SurfaceDynamicsVisualization/point.geom", "/SurfaceDynamicsVisualization/point.frag");
@@ -342,14 +368,14 @@ void SurfaceDynamicsVisualization::renderLoop()
     // Shader program for outline rendering
     ShaderProgram outlineProgram("/SurfaceDynamicsVisualization/hull.vert", "/SurfaceDynamicsVisualization/impostor.geom", "/SurfaceDynamicsVisualization/outline.frag");
 
-    std::cout << "..done" << std::endl;
+    Logger::instance().print("..done");
 
-    std::cout << "Enter render loop.." << std::endl;
+    Logger::instance().print("Enter render loop..");
 
     // Call render function of Rendering.h with lambda function
     render(mpWindow, [&] (float deltaTime)
     {
-        if(mFrameLogging) { std::cout << "### New Frame ###" << std::endl; }
+        if(mFrameLogging) { Logger::instance().print("### New Frame ###"); }
 
         // Time accumulation
         mAccTime += deltaTime;
@@ -363,7 +389,7 @@ void SurfaceDynamicsVisualization::renderLoop()
         // # Update everything before drawing
 
         // ### MOLECULE ANIMATION ##################################################################################
-        if(mFrameLogging) { std::cout << "Update animations.." << std::endl; }
+        if(mFrameLogging) { Logger::instance().print("Update animations.."); }
 
         // If playing, decide whether to switch to next frame of animation
         if(mPlayAnimation)
@@ -411,10 +437,10 @@ void SurfaceDynamicsVisualization::renderLoop()
                 }
             }
         }
-        if(mFrameLogging) { std::cout << "..done" << std::endl; }
+        if(mFrameLogging) { Logger::instance().print("..done"); }
 
         // ### CAMERA UPDATE #######################################################################################
-        if(mFrameLogging) { std::cout << "Update camera.." << std::endl; }
+        if(mFrameLogging) { Logger::instance().print("Update camera.."); }
 
         // Calculate cursor movement
         double cursorX, cursorY;
@@ -473,10 +499,10 @@ void SurfaceDynamicsVisualization::renderLoop()
             prevCursorX = cursorX;
             prevCursorY = cursorY;
         }
-        if(mFrameLogging) { std::cout << "..done" << std::endl; }
+        if(mFrameLogging) { Logger::instance().print("..done"); }
 
         // ### OVERLAY RENDERING ###################################################################################
-        if(mFrameLogging) { std::cout << "Render overlay.." << std::endl; }
+        if(mFrameLogging) { Logger::instance().print("Render overlay.."); }
 
         // # Fill overlay framebuffer
         mupOverlayFramebuffer->bind();
@@ -517,7 +543,7 @@ void SurfaceDynamicsVisualization::renderLoop()
                 outlineProgram.update("smoothAnimationMaxDeviation", mSmoothAnimationMaxDeviation);
                 outlineProgram.update("frameCount", mupGPUProtein->getFrameCount());
                 outlineProgram.update("outlineColor", mOutlineColor);
-                outlineProgram.update("ascensionFrame", mFrame - mComputedStartFrame);
+                outlineProgram.update("localFrame", mFrame - mComputedStartFrame);
                 outlineProgram.update("ascensionChangeRadiusMultiplier", mAscensionChangeRadiusMultiplier);
 
                 // Create stencil
@@ -644,30 +670,35 @@ void SurfaceDynamicsVisualization::renderLoop()
 
         // Unbind framebuffer for overlay
         mupOverlayFramebuffer->unbind();
-        if(mFrameLogging) { std::cout << "..done" << std::endl; }
+        if(mFrameLogging) { Logger::instance().print("..done"); }
 
         // ### MOLECULE RENDERING ##################################################################################
-        if(mFrameLogging) { std::cout << "Render molecule.." << std::endl; }
+        if(mFrameLogging) { Logger::instance().print("Render molecule.."); }
 
         // # Fill molecule framebuffer
         mupMoleculeFramebuffer->bind();
         bool wasResized = mupMoleculeFramebuffer->resize(mWindowWidth, mWindowHeight, mSuperSampling);
         glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
 
-        // When molecule framebuffer has been resized, do so for group rendering texture, too
+        // When molecule framebuffer has been resized, do so for other buffers too
         if(wasResized)
         {
-            glBindTexture(GL_TEXTURE_2D, mGroupRenderingTexture);
-            std::vector<GLfloat> emptyData(mupMoleculeFramebuffer->getWidth() * mupMoleculeFramebuffer->getHeight() * 4, 0);
-            glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA32F, mupMoleculeFramebuffer->getWidth(), mupMoleculeFramebuffer->getHeight(), 0, GL_RGBA, GL_FLOAT, &emptyData[0]);
-            glBindTexture(GL_TEXTURE_2D, 0);
+            // Group rendering texture
+            mupGroupRenderingTexture->resize(mupMoleculeFramebuffer->getWidth(), mupMoleculeFramebuffer->getHeight());
             std::vector<GLuint> emptyDataSemaphore(mupMoleculeFramebuffer->getWidth() * mupMoleculeFramebuffer->getHeight(), 0.f);
             mupGroupRenderingSemaphore = std::unique_ptr<GPUTextureBuffer>(new GPUTextureBuffer(emptyDataSemaphore));
+
+            // K-Buffer
+            mupKBufferTexture->resize(mupMoleculeFramebuffer->getWidth(), mupMoleculeFramebuffer->getHeight());
+            mupKBufferCounter->resize(mupMoleculeFramebuffer->getWidth(), mupMoleculeFramebuffer->getHeight());
         }
         else
         {
             // Clear group rendering texture
-            glClearTexImage(mGroupRenderingTexture, 0, GL_RGBA, GL_UNSIGNED_BYTE, NULL);
+            mupGroupRenderingTexture->clear();
+
+            // Clear k-Buffer (only counter must be cleared, not buffer itself)
+            mupKBufferCounter->clear();
         }
 
         // Bind buffers of radii and trajectory for rendering molecule
@@ -677,14 +708,7 @@ void SurfaceDynamicsVisualization::renderLoop()
         mupGroupIndicators->bind(2);
 
         // Bind image for group rendering
-        glBindImageTexture(
-            3,
-            mGroupRenderingTexture,
-            0,
-            GL_TRUE,
-            0,
-            GL_READ_WRITE,
-            GL_RGBA32F);
+        mupGroupRenderingTexture->bindAsImage(3, GPUAccess::READ_WRITE);
 
         // Bind semaphore image for group rendering
         mupGroupRenderingSemaphore->bindAsImage(4, GPUAccess::READ_WRITE);
@@ -721,7 +745,7 @@ void SurfaceDynamicsVisualization::renderLoop()
                 hullProgram.update("depthDarkeningStart", mDepthDarkeningStart);
                 hullProgram.update("depthDarkeningEnd", mDepthDarkeningEnd);
                 hullProgram.update("selectionColor", mSelectionColor);
-                hullProgram.update("ascensionFrame", mFrame - mComputedStartFrame);
+                hullProgram.update("localFrame", mFrame - mComputedStartFrame);
                 hullProgram.update("ascensionChangeRadiusMultiplier", mAscensionChangeRadiusMultiplier);
                 hullProgram.update("highlightMultiplier", mRenderOutline ? 1.f : 0.f);
                 hullProgram.update("highlightColor", mOutlineColor);
@@ -765,7 +789,7 @@ void SurfaceDynamicsVisualization::renderLoop()
                 ascensionProgram.update("frameCount", mupGPUProtein->getFrameCount());
                 ascensionProgram.update("depthDarkeningStart", mDepthDarkeningStart);
                 ascensionProgram.update("depthDarkeningEnd", mDepthDarkeningEnd);
-                ascensionProgram.update("ascensionFrame", mFrame - mComputedStartFrame);
+                ascensionProgram.update("localFrame", mFrame - mComputedStartFrame);
                 ascensionProgram.update("ascensionColorOffsetAngle", mAscensionColorOffsetAngle);
                 ascensionProgram.update("selectionColor", mSelectionColor);
                 ascensionProgram.update("ascensionChangeRadiusMultiplier", mAscensionChangeRadiusMultiplier);
@@ -799,7 +823,7 @@ void SurfaceDynamicsVisualization::renderLoop()
                 coloringProgram.update("depthDarkeningStart", mDepthDarkeningStart);
                 coloringProgram.update("depthDarkeningEnd", mDepthDarkeningEnd);
                 coloringProgram.update("selectionColor", mSelectionColor);
-                coloringProgram.update("ascensionFrame", mFrame - mComputedStartFrame);
+                coloringProgram.update("localFrame", mFrame - mComputedStartFrame);
                 coloringProgram.update("ascensionChangeRadiusMultiplier", mAscensionChangeRadiusMultiplier);
                 coloringProgram.update("highlightMultiplier", mRenderOutline ? 1.f : 0.f);
                 coloringProgram.update("highlightColor", mOutlineColor);
@@ -825,7 +849,7 @@ void SurfaceDynamicsVisualization::renderLoop()
             case Rendering::AMINOACIDS:
 
                 // Bind coloring
-                mupGPUProtein->bindColorsAminoacid(6);
+                mupGPUProtein->bindColorsAminoAcid(6);
 
                 // Prepare shader program
                 coloringProgram.use();
@@ -845,7 +869,7 @@ void SurfaceDynamicsVisualization::renderLoop()
                 coloringProgram.update("depthDarkeningStart", mDepthDarkeningStart);
                 coloringProgram.update("depthDarkeningEnd", mDepthDarkeningEnd);
                 coloringProgram.update("selectionColor", mSelectionColor);
-                coloringProgram.update("ascensionFrame", mFrame - mComputedStartFrame);
+                coloringProgram.update("localFrame", mFrame - mComputedStartFrame);
                 coloringProgram.update("ascensionChangeRadiusMultiplier", mAscensionChangeRadiusMultiplier);
                 coloringProgram.update("highlightMultiplier", mRenderOutline ? 1.f : 0.f);
                 coloringProgram.update("highlightColor", mOutlineColor);
@@ -892,7 +916,7 @@ void SurfaceDynamicsVisualization::renderLoop()
                 analysisProgram.update("depthDarkeningEnd", mDepthDarkeningEnd);
                 analysisProgram.update("groupAtomCount", (int)mupOutlineAtomIndices->getSize());
                 analysisProgram.update("selectionColor", mSelectionColor);
-                analysisProgram.update("ascensionFrame", mFrame - mComputedStartFrame);
+                analysisProgram.update("localFrame", mFrame - mComputedStartFrame);
                 analysisProgram.update("ascensionChangeRadiusMultiplier", mAscensionChangeRadiusMultiplier);
                 analysisProgram.update("highlightMultiplier", mRenderOutline ? 1.f : 0.f);
                 analysisProgram.update("highlightColor", mOutlineColor);
@@ -924,7 +948,7 @@ void SurfaceDynamicsVisualization::renderLoop()
                     hullProgram.update("depthDarkeningStart", mDepthDarkeningStart);
                     hullProgram.update("depthDarkeningEnd", mDepthDarkeningEnd);
                     hullProgram.update("selectionColor", mSelectionColor);
-                    hullProgram.update("ascensionFrame", mFrame - mComputedStartFrame);
+                    hullProgram.update("localFrame", mFrame - mComputedStartFrame);
                     hullProgram.update("ascensionChangeRadiusMultiplier", mAscensionChangeRadiusMultiplier);
                     hullProgram.update("highlightMultiplier", mRenderOutline ? 1.f : 0.f);
                     hullProgram.update("highlightColor", mOutlineColor);
@@ -935,10 +959,82 @@ void SurfaceDynamicsVisualization::renderLoop()
                     for(int i = layerCount - 1; i >= 0; i--)
                     {
                         mGPUSurfaces.at(mFrame - mComputedStartFrame)->bindSurfaceIndices(i, 6);
-                        hullProgram.update("color", mLayerColors.at(i % (int)mLayerColors.size()));
+
+                        glm::vec3 layerColor = glm::vec3(glm::pow3(float(i)/(layerCount - 1)), float(i)/(layerCount - 1), 160.0f/255.0f);
+                        hullProgram.update("color", layerColor);
+
+                        // hullProgram.update("color", mLayerColors.at(i % (int)mLayerColors.size()));
+
                         glDrawArrays(GL_POINTS, 0, mGPUSurfaces.at(mFrame - mComputedStartFrame)->getCountOfSurfaceAtoms(i));
                     }
                 }
+                break;
+
+            case Rendering::RESIDUE_SURFACE_PROXIMITY:
+
+                // # Render into k-Buffer
+
+                // Disable depth test
+                glDisable(GL_DEPTH_TEST);
+
+                // Bind program and fill uniforms
+                residueRSPPeelProgram.use();
+                residueRSPPeelProgram.update("time", mAccTime);
+                residueRSPPeelProgram.update("view", mupCamera->getViewMatrix());
+                residueRSPPeelProgram.update("projection", mupCamera->getProjectionMatrix());
+                residueRSPPeelProgram.update("cameraWorldPos", mupCamera->getPosition());
+                residueRSPPeelProgram.update("probeRadius", mRenderWithProbeRadius ? mComputedProbeRadius : 0.f);
+                residueRSPPeelProgram.update("lightDir", mLightDirection);
+                residueRSPPeelProgram.update("selectedIndex", selectedAtom);
+                residueRSPPeelProgram.update("clippingPlane", mClippingPlane);
+                residueRSPPeelProgram.update("frame", mFrame);
+                residueRSPPeelProgram.update("atomCount", mupGPUProtein->getAtomCount());
+                residueRSPPeelProgram.update("smoothAnimationRadius", mSmoothAnimationRadius);
+                residueRSPPeelProgram.update("smoothAnimationMaxDeviation", mSmoothAnimationMaxDeviation);
+                residueRSPPeelProgram.update("frameCount", mupGPUProtein->getFrameCount());
+                residueRSPPeelProgram.update("depthDarkeningStart", mDepthDarkeningStart);
+                residueRSPPeelProgram.update("depthDarkeningEnd", mDepthDarkeningEnd);
+                residueRSPPeelProgram.update("selectionColor", mSelectionColor);
+                residueRSPPeelProgram.update("localFrame", mFrame - mComputedStartFrame);
+                residueRSPPeelProgram.update("localFrameCount", mComputedEndFrame - mComputationStartFrame + 1);
+                residueRSPPeelProgram.update("ascensionChangeRadiusMultiplier", mAscensionChangeRadiusMultiplier);
+                residueRSPPeelProgram.update("highlightMultiplier", mRenderOutline ? 1.f : 0.f);
+                residueRSPPeelProgram.update("highlightColor", mOutlineColor);
+
+                // Following image binding overwrites binding in scope outside of this case. But group rendering stuff
+                // is not used here, there seems to be a good idea to use those slots.
+
+                // Bind counter for pixels in k-Buffer at processed fragment
+                mupKBufferCounter->bindAsImage(3, GPUAccess::READ_WRITE);
+
+                // Bind output images aka k-Buffer
+                mupKBufferTexture->bindAsImage(4, GPUAccess::WRITE_ONLY);
+
+                // Bind coloring
+                mupGPUProtein->bindColorsAminoAcid(6);
+
+                // Bind buffer with amion acid mapping
+                mupGPUProtein->bindAminoAcidMapping(7);
+
+                // Bind buffer with smoothed layers delta
+                mupLayersDeltaBuffer->bind(8);
+
+                // Execute drawing aka peeling generated pixels into k-Buffer
+                glDrawArrays(GL_POINTS, 0, mupGPUProtein->getAtomCount());
+
+                // Enable depth test
+                glEnable(GL_DEPTH_TEST);
+
+                // # Render result of blending into molecule framebuffer
+
+                // Bind input images
+                mupKBufferCounter->bindAsImage(0, GPUAccess::READ_ONLY);
+                mupKBufferTexture->bindAsImage(1, GPUAccess::READ_ONLY);
+
+                // Render screenfilling quad with results from k-Buffer
+                residueRSPResolveProgram.use();
+                glDrawArrays(GL_POINTS, 0, 1);
+
                 break;
             }
         }
@@ -971,10 +1067,10 @@ void SurfaceDynamicsVisualization::renderLoop()
 
         // Unbind molecule framebuffer
         mupMoleculeFramebuffer->unbind();
-        if(mFrameLogging) { std::cout << "..done" << std::endl; }
+        if(mFrameLogging) { Logger::instance().print("..done"); }
 
         // ### SELCTED ATOM RENDERING ##############################################################################
-        if(mFrameLogging) { std::cout << "Render selected atom.." << std::endl; }
+        if(mFrameLogging) { Logger::instance().print("Render selected atom.."); }
 
         // # Fill selected atom framebuffer
         mupSelectedAtomFramebuffer->bind();
@@ -991,14 +1087,7 @@ void SurfaceDynamicsVisualization::renderLoop()
             mupGroupIndicators->bind(2);
 
             // Bind image for group rendering
-            glBindImageTexture(
-                3,
-                mGroupRenderingTexture,
-                0,
-                GL_TRUE,
-                0,
-                GL_READ_WRITE,
-                GL_RGBA32F);
+            mupGroupRenderingTexture->bindAsImage(3, GPUAccess::READ_WRITE);
 
             // Bind semaphore image for group rendering
             mupGroupRenderingSemaphore->bindAsImage(4, GPUAccess::READ_WRITE);
@@ -1029,10 +1118,10 @@ void SurfaceDynamicsVisualization::renderLoop()
 
         // Unbind selected atom framebuffer
         mupSelectedAtomFramebuffer->unbind();
-        if(mFrameLogging) { std::cout << "..done" << std::endl; }
+        if(mFrameLogging) { Logger::instance().print("..done"); }
 
         // ### COMPOSITING #########################################################################################
-        if(mFrameLogging) { std::cout << "Do compositing.." << std::endl; }
+        if(mFrameLogging) { Logger::instance().print("Do compositing.."); }
 
         // Prepare viewport
         glViewport(0, 0, mWindowWidth, mWindowHeight);
@@ -1060,6 +1149,9 @@ void SurfaceDynamicsVisualization::renderLoop()
             break;
         case Background::BEACH:
             glBindTexture(GL_TEXTURE_CUBE_MAP, mBeachCubemapTexture);
+            break;
+        case Background::WHITE:
+            glBindTexture(GL_TEXTURE_CUBE_MAP, mWhiteCubemapTexture);
             break;
         }
 
@@ -1089,7 +1181,7 @@ void SurfaceDynamicsVisualization::renderLoop()
 
         // Bind group rendering texture
         glActiveTexture(GL_TEXTURE3);
-        glBindTexture(GL_TEXTURE_2D, mGroupRenderingTexture);
+        glBindTexture(GL_TEXTURE_2D, mupGroupRenderingTexture->getTexture());
 
         // Draw screenfilling quad
         screenFillingProgram.use();
@@ -1100,7 +1192,7 @@ void SurfaceDynamicsVisualization::renderLoop()
         screenFillingProgram.update("moleculeAlpha", mNoneGroupOpacity); // alpha value of completely rendered molecule
         screenFillingProgram.update("groupAlpha", mRenderGroupOnTop ? 1.f : 0.f); // alpha value for group which rendered on top
         glDrawArrays(GL_POINTS, 0, 1);
-        if(mFrameLogging) { std::cout << "..done" << std::endl; }
+        if(mFrameLogging) { Logger::instance().print("..done"); }
 
         // Back to opaque rendering
         glDisable(GL_BLEND);
@@ -1110,13 +1202,13 @@ void SurfaceDynamicsVisualization::renderLoop()
         glEnable(GL_DEPTH_TEST);
 
         // Render GUI in standard frame buffer on top of everything
-        if(mFrameLogging) { std::cout << "Render user interface.." << std::endl; }
+        if(mFrameLogging) { Logger::instance().print("Render user interface.."); }
         ImGui_ImplGlfwGL3_NewFrame();
         renderGUI();
-        if(mFrameLogging) { std::cout << "..done" << std::endl; }
+        if(mFrameLogging) { Logger::instance().print("..done"); }
     });
 
-    std::cout << "..exit" << std::endl;
+    Logger::instance().print("..exit");
 
     // Delete OpenGL structures
     glDeleteVertexArrays(1, &axisGizmoVAO);
@@ -1156,6 +1248,7 @@ void SurfaceDynamicsVisualization::keyCallback(int key, int scancode, int action
                     glfwSetInputMode(mpWindow, GLFW_CURSOR, GLFW_CURSOR_NORMAL);
                     mMoveCamera = false;
                 }
+                break;
             }
             case GLFW_KEY_1: { mRendering = Rendering::HULL; break; }
             case GLFW_KEY_2: { mRendering = Rendering::ASCENSION; break; }
@@ -1163,6 +1256,7 @@ void SurfaceDynamicsVisualization::keyCallback(int key, int scancode, int action
             case GLFW_KEY_4: { mRendering = Rendering::AMINOACIDS; break; }
             case GLFW_KEY_5: { mRendering = Rendering::ANALYSIS; break; }
             case GLFW_KEY_6: { mRendering = Rendering::LAYERS; break; }
+            case GLFW_KEY_7: { mRendering = Rendering::RESIDUE_SURFACE_PROXIMITY; break; }
         }
     }
 }
@@ -1191,9 +1285,12 @@ void SurfaceDynamicsVisualization::mouseButtonCallback(int button, int action, i
     }
     else if(button == GLFW_MOUSE_BUTTON_RIGHT && action == GLFW_PRESS)
     {
-        int atomIndex = getAtomBeneathCursor();
-        mSelectedAtom = atomIndex >= 0 ? atomIndex : mSelectedAtom;
-        mNextAnalyseAtomIndex = mSelectedAtom;
+        if(mRendering != Rendering::RESIDUE_SURFACE_PROXIMITY) // only rendering mode where pick index is not set
+        {
+            int atomIndex = getAtomBeneathCursor();
+            mSelectedAtom = atomIndex >= 0 ? atomIndex : mSelectedAtom;
+            mNextAnalyseAtomIndex = mSelectedAtom;
+        }
     }
 }
 
@@ -1211,7 +1308,7 @@ void SurfaceDynamicsVisualization::renderGUI()
     ImGui::PushStyleColor(ImGuiCol_MenuBarBg, ImVec4(0.2f, 0.2f, 0.2f, 0.25f)); // menu bar background
 
     // Main menu bar
-    if(mFrameLogging) { std::cout << "Main menu bar.." << std::endl; }
+    if(mFrameLogging) { Logger::instance().print("Main menu bar.."); }
     if (ImGui::BeginMainMenuBar())
     {
         // General menu
@@ -1333,7 +1430,7 @@ void SurfaceDynamicsVisualization::renderGUI()
         // End main menu bar
         ImGui::EndMainMenuBar();
     }
-    if(mFrameLogging) { std::cout << "..done" << std::endl; }
+    if(mFrameLogging) { Logger::instance().print("..done"); }
 
     // ###################################################################################################
     // ### WINDOWS #######################################################################################
@@ -1353,7 +1450,7 @@ void SurfaceDynamicsVisualization::renderGUI()
     ImGui::PushStyleColor(ImGuiCol_SliderGrabActive, ImVec4(0.1f, 0.1f, 0.1f, 0.75f)); // slider grab active
 
     // ### COMPUTATION ###################################################################################
-    if(mFrameLogging) { std::cout << "Computation window.." << std::endl; }
+    if(mFrameLogging) { Logger::instance().print("Computation window.."); }
     if(mShowComputationWindow)
     {
         ImGui::PushStyleColor(ImGuiCol_WindowBg, ImVec4(0.5f, 0.0f, 0.0f, 0.75f)); // window background
@@ -1438,10 +1535,10 @@ void SurfaceDynamicsVisualization::renderGUI()
         ImGui::End();
         ImGui::PopStyleColor(); // window background
     }
-    if(mFrameLogging) { std::cout << "..done" << std::endl; }
+    if(mFrameLogging) { Logger::instance().print("..done"); }
 
     // ### CAMERA ########################################################################################
-    if(mFrameLogging) { std::cout << "Camera window.." << std::endl; }
+    if(mFrameLogging) { Logger::instance().print("Camera window.."); }
     if(mShowCameraWindow)
     {
         ImGui::PushStyleColor(ImGuiCol_WindowBg, ImVec4(0.0f, 0.0f, 0.5f, 0.75f)); // window background
@@ -1543,10 +1640,10 @@ void SurfaceDynamicsVisualization::renderGUI()
         ImGui::End();
         ImGui::PopStyleColor(); // window background
     }
-    if(mFrameLogging) { std::cout << "..done" << std::endl; }
+    if(mFrameLogging) { Logger::instance().print("..done"); }
 
     // ### VISUALIZATION #################################################################################
-    if(mFrameLogging) { std::cout << "Visualization window.." << std::endl; }
+    if(mFrameLogging) { Logger::instance().print("Visualization window.."); }
     if(mShowVisualizationWindow)
     {
         ImGui::PushStyleColor(ImGuiCol_WindowBg, ImVec4(0.5f, 0.0f, 0.5f, 0.75f)); // window background
@@ -1617,7 +1714,7 @@ void SurfaceDynamicsVisualization::renderGUI()
             if (ImGui::CollapsingHeader("Rendering", "Rendering##Visualization", true, true))
             {
                 // Surface rendering
-                ImGui::Combo("##RenderingCombo", (int*)&mRendering, "[1] Hull\0[2] Ascension\0[3] Elements\0[4] Aminoacids\0[5] Analysis\0[6] Layers\0");
+                ImGui::Combo("##RenderingCombo", (int*)&mRendering, "[1] Hull\0[2] Ascension\0[3] Elements\0[4] Aminoacids\0[5] Analysis\0[6] Layers\0[7] Residue Surface Proximity");
 
                 // Rendering of internal and surface atoms
                 if(mRendering == Rendering::HULL
@@ -1734,10 +1831,10 @@ void SurfaceDynamicsVisualization::renderGUI()
         ImGui::End();
         ImGui::PopStyleColor(); // window background
     }
-    if(mFrameLogging) { std::cout << "..done" << std::endl; }
+    if(mFrameLogging) { Logger::instance().print("..done"); }
 
     // ### INFORMATION ###################################################################################
-    if(mFrameLogging) { std::cout << "Information window.." << std::endl; }
+    if(mFrameLogging) { Logger::instance().print("Information window.."); }
     if(mShowInformationWindow)
     {
         ImGui::PushStyleColor(ImGuiCol_WindowBg, ImVec4(0.0f, 0.5f, 0.0f, 0.75f)); // window background
@@ -1777,8 +1874,8 @@ void SurfaceDynamicsVisualization::renderGUI()
             if(ImGui::IsItemHovered() && mShowTooltips) { ImGui::SetTooltip("Index of selected atom."); }
             mSelectedAtom = glm::clamp(mSelectedAtom, 0, mupGPUProtein->getAtomCount() - 1);
             ImGui::Text(std::string("Index: " + std::to_string(mSelectedAtom)).c_str());
-            ImGui::Text(std::string("Element: " + mupGPUProtein->getElement(mSelectedAtom)).c_str());
-            ImGui::Text(std::string("Aminoacid: " + mupGPUProtein->getAminoacid(mSelectedAtom)).c_str());
+            ImGui::Text(std::string("Element: " + mupGPUProtein->getElementName(mSelectedAtom)).c_str());
+            ImGui::Text(std::string("AminoAcid: " + mupGPUProtein->getAminoAcidName(mSelectedAtom)).c_str());
             if(frameComputed())
             {
                 // Layer
@@ -1819,10 +1916,10 @@ void SurfaceDynamicsVisualization::renderGUI()
         ImGui::End();
         ImGui::PopStyleColor(); // window background
     }
-    if(mFrameLogging) { std::cout << "..done" << std::endl; }
+    if(mFrameLogging) { Logger::instance().print("..done"); }
 
     // ### VALIDATION ####################################################################################
-    if(mFrameLogging) { std::cout << "Validation window.." << std::endl; }
+    if(mFrameLogging) { Logger::instance().print("Validation window.."); }
     if(mShowValidationWindow)
     {
         ImGui::PushStyleColor(ImGuiCol_WindowBg, ImVec4(0.0f, 0.5f, 0.5f, 0.75f)); // window background
@@ -1831,18 +1928,21 @@ void SurfaceDynamicsVisualization::renderGUI()
         // Do validation
         ImGui::SliderInt("Samples", &mSurfaceValidationAtomSampleCount, 1, 10000);
         ImGui::SliderInt("Seed", &mSurfaceValidationSeed, 0, 1337);
-        if(frameComputed() && ImGui::Button("Validate Surface"))
+        if(frameComputed())
         {
-            mupSurfaceValidation->validate(
-                mupGPUProtein.get(),
-                mGPUSurfaces.at(mFrame - mComputedStartFrame).get(),
-                mFrame,
-                mLayer,
-                mComputedProbeRadius,
-                mSurfaceValidationSeed,
-                mSurfaceValidationAtomSampleCount,
-                mValidationInformation,
-                std::vector<GLuint>());
+            if(ImGui::Button("Validate Surface"))
+            {
+                mupSurfaceValidation->validate(
+                    mupGPUProtein.get(),
+                    mGPUSurfaces.at(mFrame - mComputedStartFrame).get(),
+                    mFrame,
+                    mLayer,
+                    mComputedProbeRadius,
+                    mSurfaceValidationSeed,
+                    mSurfaceValidationAtomSampleCount,
+                    mValidationInformation,
+                    std::vector<GLuint>());
+            }
         }
         else
         {
@@ -1894,10 +1994,10 @@ void SurfaceDynamicsVisualization::renderGUI()
         ImGui::End();
         ImGui::PopStyleColor(); // window background
     }
-    if(mFrameLogging) { std::cout << "..done" << std::endl; }
+    if(mFrameLogging) { Logger::instance().print("..done"); }
 
     // ### ANALYSIS ######################################################################################
-    if(mFrameLogging) { std::cout << "Analysis window.." << std::endl; }
+    if(mFrameLogging) { Logger::instance().print("Analysis window.."); }
     if(mShowAnalysisWindow)
     {
         ImGui::PushStyleColor(ImGuiCol_WindowBg, ImVec4(0.5f, 0.5f, 0.0f, 0.75f)); // window background
@@ -1932,7 +2032,7 @@ void SurfaceDynamicsVisualization::renderGUI()
                     }
 
                     // Tell user
-                    std::cout << "Saved file: " << mSurfaceIndicesFilePath << std::endl;
+                    Logger::instance().print("Saved file: " + mSurfaceIndicesFilePath);
                 }
                 if(ImGui::IsItemHovered() && mShowTooltips) { ImGui::SetTooltip("Save surface indices of this frame to file."); }
                 ImGui::SameLine();
@@ -1981,7 +2081,7 @@ void SurfaceDynamicsVisualization::renderGUI()
                     }
 
                     // Tell user
-                    std::cout << "Saved file: " << mGlobalAnalysisFilePath << std::endl;
+                    Logger::instance().print("Saved file: " + mGlobalAnalysisFilePath);
                 }
                 if(ImGui::IsItemHovered() && mShowTooltips) { ImGui::SetTooltip("Save global analysis to file."); }
                 ImGui::SameLine();
@@ -1991,47 +2091,8 @@ void SurfaceDynamicsVisualization::renderGUI()
                 // ### Save amino acid analysis to file ###
                 if(ImGui::Button("Save Amino Acids Analysis##aminoacidsanalysis"))
                 {
-                    // Fetch values for all amino acids
-                    struct AminoAcidAnalysis
-                    {
-                        std::string name;
-                        int startIndex;
-                        int endIndex;
-                        float averageLayersDeltaAccumulation;
-                        float inverseAverageLayersDeltaAccumulation;
-                        std::vector<float> averageLayers;
-                        std::vector<float> inverseAverageLayers;
-                        std::vector<float> averageLayersDelta;
-                        std::vector<float> inverseAverageLayersDelta;
-                    };
-
-                    // Go over all amino acids
-                    std::vector<GPUProtein::AminoAcid> aminoAcids = mupGPUProtein->getAminoAcids();
-                    std::vector<AminoAcidAnalysis> aminoAcidAnalysis; // vector to fill
-                    for(const GPUProtein::AminoAcid& rAminoAcid : aminoAcids)
-                    {
-                        // Do calculations
-                        AminoAcidAnalysis current;
-                        current.name = rAminoAcid.name;
-                        current.startIndex = rAminoAcid.startIndex;
-                        current.endIndex = rAminoAcid.endIndex;
-                        if(atomsInRangeCalculations(
-                            current.startIndex,
-                            current.endIndex,
-                            current.averageLayersDeltaAccumulation,
-                            current.inverseAverageLayersDeltaAccumulation,
-                            current.averageLayers,
-                            current.inverseAverageLayers,
-                            current.averageLayersDelta,
-                            current.inverseAverageLayersDelta))
-                        {
-                            // Only push back when successful
-                            aminoAcidAnalysis.push_back(current);
-                        }
-                    }
-
                     // ### ACCUMULATED VALUES ###
-                    if(!aminoAcidAnalysis.empty())
+                    if(!mAminoAcidAnalysis.empty())
                     {
                         // Open file
                         std::ofstream fs(mAminoAcidAnalysisAccumulatedFilePath, std::ios_base::out); // overwrite existing
@@ -2042,7 +2103,7 @@ void SurfaceDynamicsVisualization::renderGUI()
                         csvs << csv::endl;
 
                         // Fill data
-                        for(const AminoAcidAnalysis& rAnalysis : aminoAcidAnalysis)
+                        for(const AminoAcidAnalysis& rAnalysis : mAminoAcidAnalysis)
                         {
                             // Name
                             csvs << rAnalysis.name;
@@ -2064,11 +2125,11 @@ void SurfaceDynamicsVisualization::renderGUI()
                         }
 
                         // Tell user
-                        std::cout << "Saved file: " << mAminoAcidAnalysisAccumulatedFilePath << std::endl;
+                        Logger::instance().print("Saved file: " + mAminoAcidAnalysisAccumulatedFilePath);
                     }
 
                     // ### AVERAGE LAYERS ###
-                    if(!aminoAcidAnalysis.empty())
+                    if(!mAminoAcidAnalysis.empty())
                     {
                         // Open file
                         std::ofstream fs(mAminoAcidAnalysisAvgLayersFilePath, std::ios_base::out); // overwrite existing
@@ -2076,20 +2137,20 @@ void SurfaceDynamicsVisualization::renderGUI()
 
                         // Create header
                         csvs << "Computed Frame";
-                        for(const AminoAcidAnalysis& rAnalysis : aminoAcidAnalysis)
+                        for(const AminoAcidAnalysis& rAnalysis : mAminoAcidAnalysis)
                         {
                             csvs << rAnalysis.name;
                         }
                         csvs << csv::endl;
 
                         // Go over computed frames
-                        for(int computedFrame = 0; computedFrame < aminoAcidAnalysis.back().averageLayers.size(); computedFrame++) // assume that all average layers vectors have same size
+                        for(int computedFrame = 0; computedFrame < mAminoAcidAnalysis.back().averageLayers.size(); computedFrame++) // assume that all average layers vectors have same size
                         {
                             // Computed frame
                             csvs << computedFrame;
 
                             // Average layer of amino acids in computed frame
-                            for(const AminoAcidAnalysis& rAnalysis : aminoAcidAnalysis)
+                            for(const AminoAcidAnalysis& rAnalysis : mAminoAcidAnalysis)
                             {
                                 csvs << rAnalysis.averageLayers.at(computedFrame);
                             }
@@ -2097,11 +2158,11 @@ void SurfaceDynamicsVisualization::renderGUI()
                         }
 
                         // Tell user
-                        std::cout << "Saved file: " << mAminoAcidAnalysisAvgLayersFilePath << std::endl;
+                        Logger::instance().print("Saved file: " + mAminoAcidAnalysisAvgLayersFilePath);
                     }
 
                     // ### INVERSE AVERAGE LAYERS ###
-                    if(!aminoAcidAnalysis.empty())
+                    if(!mAminoAcidAnalysis.empty())
                     {
                         // Open file
                         std::ofstream fs(mAminoAcidAnalysisInverseAvgLayersFilePath, std::ios_base::out); // overwrite existing
@@ -2109,20 +2170,20 @@ void SurfaceDynamicsVisualization::renderGUI()
 
                         // Create header
                         csvs << "Computed Frame";
-                        for(const AminoAcidAnalysis& rAnalysis : aminoAcidAnalysis)
+                        for(const AminoAcidAnalysis& rAnalysis : mAminoAcidAnalysis)
                         {
                             csvs << rAnalysis.name;
                         }
                         csvs << csv::endl;
 
                         // Go over computed frames
-                        for(int computedFrame = 0; computedFrame < aminoAcidAnalysis.back().inverseAverageLayers.size(); computedFrame++) // assume that all inverse average layers vectors have same size
+                        for(int computedFrame = 0; computedFrame < mAminoAcidAnalysis.back().inverseAverageLayers.size(); computedFrame++) // assume that all inverse average layers vectors have same size
                         {
                             // Computed frame
                             csvs << computedFrame;
 
                             // Inverse average layer of amino acids in computed frame
-                            for(const AminoAcidAnalysis& rAnalysis : aminoAcidAnalysis)
+                            for(const AminoAcidAnalysis& rAnalysis : mAminoAcidAnalysis)
                             {
                                 csvs << rAnalysis.inverseAverageLayers.at(computedFrame);
                             }
@@ -2130,11 +2191,11 @@ void SurfaceDynamicsVisualization::renderGUI()
                         }
 
                         // Tell user
-                        std::cout << "Saved file: " << mAminoAcidAnalysisInverseAvgLayersFilePath << std::endl;
+                        Logger::instance().print("Saved file: "+ mAminoAcidAnalysisInverseAvgLayersFilePath);
                     }
 
                     // ### AVERAGE LAYERS DELTA ###
-                    if(!aminoAcidAnalysis.empty())
+                    if(!mAminoAcidAnalysis.empty())
                     {
                         // Open file
                         std::ofstream fs(mAminoAcidAnalysisAvgLayersDeltaFilePath, std::ios_base::out); // overwrite existing
@@ -2142,20 +2203,20 @@ void SurfaceDynamicsVisualization::renderGUI()
 
                         // Create header
                         csvs << "Computed Frame";
-                        for(const AminoAcidAnalysis& rAnalysis : aminoAcidAnalysis)
+                        for(const AminoAcidAnalysis& rAnalysis : mAminoAcidAnalysis)
                         {
                             csvs << rAnalysis.name;
                         }
                         csvs << csv::endl;
 
                         // Go over computed frames
-                        for(int computedFrame = 0; computedFrame < aminoAcidAnalysis.back().averageLayersDelta.size(); computedFrame++) // assume that all average layers delta vectors have same size
+                        for(int computedFrame = 0; computedFrame < mAminoAcidAnalysis.back().averageLayersDelta.size(); computedFrame++) // assume that all average layers delta vectors have same size
                         {
                             // Computed frame
                             csvs << computedFrame;
 
                             // Average layer of amino acids in computed frame
-                            for(const AminoAcidAnalysis& rAnalysis : aminoAcidAnalysis)
+                            for(const AminoAcidAnalysis& rAnalysis : mAminoAcidAnalysis)
                             {
                                 csvs << rAnalysis.averageLayersDelta.at(computedFrame);
                             }
@@ -2163,11 +2224,11 @@ void SurfaceDynamicsVisualization::renderGUI()
                         }
 
                         // Tell user
-                        std::cout << "Saved file: " << mAminoAcidAnalysisAvgLayersDeltaFilePath << std::endl;
+                        Logger::instance().print("Saved file: " + mAminoAcidAnalysisAvgLayersDeltaFilePath);
                     }
 
                     // ### INVERSE AVERAGE LAYERS DELTA ###
-                    if(!aminoAcidAnalysis.empty())
+                    if(!mAminoAcidAnalysis.empty())
                     {
                         // Open file
                         std::ofstream fs(mAminoAcidAnalysisInverseAvgLayersDeltaFilePath, std::ios_base::out); // overwrite existing
@@ -2175,20 +2236,20 @@ void SurfaceDynamicsVisualization::renderGUI()
 
                         // Create header
                         csvs << "Computed Frame";
-                        for(const AminoAcidAnalysis& rAnalysis : aminoAcidAnalysis)
+                        for(const AminoAcidAnalysis& rAnalysis : mAminoAcidAnalysis)
                         {
                             csvs << rAnalysis.name;
                         }
                         csvs << csv::endl;
 
                         // Go over computed frames
-                        for(int computedFrame = 0; computedFrame < aminoAcidAnalysis.back().inverseAverageLayersDelta.size(); computedFrame++) // assume that all inverse average layers delta vectors have same size
+                        for(int computedFrame = 0; computedFrame < mAminoAcidAnalysis.back().inverseAverageLayersDelta.size(); computedFrame++) // assume that all inverse average layers delta vectors have same size
                         {
                             // Computed frame
                             csvs << computedFrame;
 
                             // Average layer of amino acids in computed frame
-                            for(const AminoAcidAnalysis& rAnalysis : aminoAcidAnalysis)
+                            for(const AminoAcidAnalysis& rAnalysis : mAminoAcidAnalysis)
                             {
                                 csvs << rAnalysis.inverseAverageLayersDelta.at(computedFrame);
                             }
@@ -2196,7 +2257,7 @@ void SurfaceDynamicsVisualization::renderGUI()
                         }
 
                         // Tell user
-                        std::cout << "Saved file: " << mAminoAcidAnalysisInverseAvgLayersDeltaFilePath << std::endl;
+                        Logger::instance().print("Saved file: " + mAminoAcidAnalysisInverseAvgLayersDeltaFilePath);
                     }
 
                 }
@@ -2234,11 +2295,11 @@ void SurfaceDynamicsVisualization::renderGUI()
                     ImGui::SameLine();
 
                     // Element of atom
-                    ImGui::Text(mupGPUProtein->getElement(atomIndex).c_str());
+                    ImGui::Text(mupGPUProtein->getElementName(atomIndex).c_str());
                     ImGui::SameLine();
 
-                    // Aminoacid of atom
-                    ImGui::Text(mupGPUProtein->getAminoacid(atomIndex).c_str());
+                    // Amino acid of atom
+                    ImGui::Text(mupGPUProtein->getAminoAcidName(atomIndex).c_str());
                     ImGui::SameLine(ImGui::GetWindowContentRegionMax().x - 60);
 
                     // Select that atom (use ## to add number for an unique button id)
@@ -2371,7 +2432,7 @@ void SurfaceDynamicsVisualization::renderGUI()
                 }
                 else
                 {
-                    if(ImGui::Button("Show Group on Top", ImVec2(173, 22)))
+                    if(ImGui::Button("Show Group On Top", ImVec2(173, 22)))
                     {
                         mRenderGroupOnTop = true;
                     }
@@ -2501,7 +2562,7 @@ void SurfaceDynamicsVisualization::renderGUI()
                         }
 
                         // Tell user
-                        std::cout << "Saved file: " << mGroupAnalysisFilePath << std::endl;
+                        Logger::instance().print("Saved file: " + mGroupAnalysisFilePath);
                     }
                     if(ImGui::IsItemHovered() && mShowTooltips) { ImGui::SetTooltip("Save group analysis to file."); }
                     ImGui::SameLine();
@@ -2523,17 +2584,17 @@ void SurfaceDynamicsVisualization::renderGUI()
         ImGui::End();
         ImGui::PopStyleColor(); // window background
     }
-    if(mFrameLogging) { std::cout << "..done" << std::endl; }
+    if(mFrameLogging) { Logger::instance().print("..done"); }
 
     // ### RENDERING #####################################################################################
-    if(mFrameLogging) { std::cout << "Rendering window.." << std::endl; }
+    if(mFrameLogging) { Logger::instance().print("Rendering window.."); }
     if(mShowRenderingWindow)
     {
         ImGui::PushStyleColor(ImGuiCol_WindowBg, ImVec4(0.25f, 0.25f, 0.25f, 0.75f)); // window background
         ImGui::Begin("Rendering", NULL, 0);
 
         // Background
-        ImGui::Combo("Background", (int*)&mBackground, "None\0Scientific\0Computervisualistik\0Beach\0");
+        ImGui::Combo("Background", (int*)&mBackground, "None\0Scientific\0Computervisualistik\0Beach\0White\0");
         if(ImGui::IsItemHovered() && mShowTooltips) { ImGui::SetTooltip("Choose cubemap used for background."); }
 
         // Lighting
@@ -2572,7 +2633,7 @@ void SurfaceDynamicsVisualization::renderGUI()
         ImGui::End();
         ImGui::PopStyleColor(); // window background
     }
-    if(mFrameLogging) { std::cout << "..done" << std::endl; }
+    if(mFrameLogging) { Logger::instance().print("..done"); }
 
     ImGui::PopStyleColor(); // slider grab active
     ImGui::PopStyleColor(); // header active
@@ -2671,6 +2732,9 @@ void SurfaceDynamicsVisualization::computeLayers(bool useGPU)
 
     // Ascension computation
     computeAscension();
+
+    // Update amino acids analysis
+    updateAminoAcidsAnaylsis();
 
     // Set to first computed frame
     setFrame(mComputedStartFrame);
@@ -2849,8 +2913,9 @@ float SurfaceDynamicsVisualization::approximateSurfaceArea(std::vector<GLuint> i
     for(int index : indices)
     {
         // Add surface
-        float radius = mupGPUProtein->getRadii()->at(index);
-        float atomSurface = 4.f * glm::pi<float>() * radius * radius;
+        const float radius = mupGPUProtein->getRadii()->at(index);
+        const float extendedRadius = radius + mComputedProbeRadius;
+        const float atomSurface = 4.f * glm::pi<float>() * extendedRadius * extendedRadius;
         surface += atomSurface * ((float)mupHullSamples->getSurfaceSampleCount(frame, index) / (float)mupHullSamples->getSampleCount());
     }
 
@@ -2944,6 +3009,136 @@ void SurfaceDynamicsVisualization::updateGroupAnalysis()
     }
 }
 
+// TODO check for CORRECTNESS!!! AND OPTIMIZE! (especially .size stuff)
+void SurfaceDynamicsVisualization::updateAminoAcidsAnaylsis()
+{
+    // Clear result vector
+    mAminoAcidAnalysis.clear();
+
+    // Get amino acids out of protein
+    std::vector<GPUProtein::AminoAcid> aminoAcids = mupGPUProtein->getAminoAcids();
+    for(const GPUProtein::AminoAcid& rAminoAcid : aminoAcids)
+    {
+        // Do calculations for each amino acid
+        AminoAcidAnalysis current;
+        current.name = rAminoAcid.name;
+        current.startIndex = rAminoAcid.startIndex;
+        current.endIndex = rAminoAcid.endIndex;
+
+        // Go over frames and extract average layer of atoms
+        current.averageLayers = std::vector<float>(mGPUSurfaces.size(), -1.f); // minus one means no data
+        current.inverseAverageLayers = std::vector<float>(mGPUSurfaces.size(), -1.f); // minus one means no data
+
+        for(int frame = mComputedStartFrame; frame <= mComputedEndFrame; frame++)
+        {
+            // Relative frame
+            int relativeFrame = frame - mComputedStartFrame;
+
+            // Do it only when layers were extracted for this frame
+            if(mGPUSurfaces.at(relativeFrame)->layersExtracted())
+            {
+                // Calculate layer of atoms in rage for that frame
+                float avgLayer = 0;
+                float invAvgLayer = 0;
+                for(int atomIndex = current.startIndex; atomIndex <= current.endIndex; atomIndex++)
+                {
+                    // Get layer of that atom
+                    int layer = mGPUSurfaces.at(relativeFrame)->getLayerOfAtom(atomIndex);
+                    int invLayer = (mGPUSurfaces.at(relativeFrame)->getLayerCount() - 1) - layer;
+
+                    // Accumulate for average layer calculation
+                    avgLayer += (float)layer;
+                    invAvgLayer += (float)invLayer;
+                }
+                current.averageLayers.at(relativeFrame) = avgLayer / (float)((current.endIndex - current.startIndex) + 1); // divide through count of atoms
+                current.inverseAverageLayers.at(relativeFrame) = invAvgLayer / (float)((current.endIndex - current.startIndex) + 1); // divide through count of atoms
+            }
+        }
+
+        // Store deltas to vectors
+        current.averageLayersDelta = std::vector<float>(current.averageLayers.size() - 1, -1.f); // minus one means no data
+        current.inverseAverageLayersDelta = std::vector<float>(current.inverseAverageLayers.size() - 1, -1.f); // minus one means no data
+
+        // Average layers delta accumulation
+        current.averageLayersDeltaAccumulation = 0.f;
+        for(int i = 0; i < current.averageLayers.size() - 1; i++)
+        {
+            // Continue if any avg is not ok
+            if(current.averageLayers.at(i) < 0 || current.averageLayers.at(i+1) < 0)
+            {
+                mAminoAcidAnalysis.push_back(AminoAcidAnalysis());
+                continue;
+            }
+
+            float delta = current.averageLayers.at(i + 1) - current.averageLayers.at(i);
+            delta = delta < 0 ? -delta : delta;
+            current.averageLayersDelta.at(i) = delta;
+            current.averageLayersDeltaAccumulation += delta;
+        }
+
+        // Inverse average delta accumulation
+        current.inverseAverageLayersDeltaAccumulation = 0.f;
+        for(int i = 0; i < current.inverseAverageLayers.size() - 1; i++)
+        {
+            // Continue if any invAvg is not ok
+            if(current.inverseAverageLayers.at(i) < 0 || current.inverseAverageLayers.at(i+1) < 0)
+            {
+                mAminoAcidAnalysis.push_back(AminoAcidAnalysis());
+                continue;
+            }
+
+            float delta = current.inverseAverageLayers.at(i + 1) - current.inverseAverageLayers.at(i);
+            delta = delta < 0 ? -delta : delta;
+            current.inverseAverageLayersDelta.at(i) = delta;
+            current.inverseAverageLayersDeltaAccumulation += delta;
+        }
+
+        // Push back result
+        mAminoAcidAnalysis.push_back(current);
+    }
+
+    // Fill buffer for residue surface proximity rendering with smoothed delta values
+    int aminoAcidCount = aminoAcids.size();
+    int localFrameCount = (mComputedEndFrame - mComputedStartFrame + 1);
+    std::vector<GLfloat> smoothLayerDelta;
+    smoothLayerDelta.resize(aminoAcidCount * localFrameCount, 0.f); // amino acid count times count of computed frames
+
+    // Gaussian kernel
+    const GLfloat gaussian[] = { 0.06136f, 0.24477f, 0.38774f, 0.24477f, 0.06136f };
+
+    // Do it for each amino acid
+    for(int i = 0; i < aminoAcidCount; i++)
+    {
+        // Count of indices
+        int count = mAminoAcidAnalysis.at(i).averageLayersDelta.size();
+
+        // Go over frames for each amino acid
+        for(int j = 0; j < count; j++)
+        {
+            // Smooth delta (hardcoded for given gaussian kernel)
+            float value = 0;
+            for(int k = -2; k <= 2; k++)
+            {
+                // Check ranges
+                int index = j + k;
+                if(index < 0 || index >= count)
+                {
+                    continue;
+                }
+
+                // Add up value
+                value += mAminoAcidAnalysis.at(i).averageLayersDelta.at(index) * gaussian[k + 2];
+            }
+
+            // Push back value to smoothed vector
+            smoothLayerDelta.at((i * localFrameCount) + j + 1) = value; // add one because at first frame no delta available but it is much easier to have local frame count many entries
+        }
+    }
+
+    // Fill values into GPUBuffer
+    mupLayersDeltaBuffer->fill(smoothLayerDelta, GL_DYNAMIC_DRAW);
+}
+
 GLuint SurfaceDynamicsVisualization::createCubemapTexture(
         std::string filepathPosX,
         std::string filepathNegX,
@@ -2984,7 +3179,7 @@ GLuint SurfaceDynamicsVisualization::createCubemapTexture(
         // Check whether file was found and parsed
         if (pData == NULL)
         {
-            std::cout << "Image file not found or error at parsing: " << cubemapFullpaths.at(i) << std::endl;
+            Logger::instance().print("Image file not found or error at parsing: " + cubemapFullpaths.at(i));
             continue;
         }
 
@@ -3016,93 +3211,12 @@ void SurfaceDynamicsVisualization::resetPath(std::string& rPath, std::string app
     rPath = path;
 }
 
-bool SurfaceDynamicsVisualization::atomsInRangeCalculations(
-    int startIndex,
-    int endIndex,
-    float& rAcc,
-    float& rInverseAcc,
-    std::vector<float>& rAvgLayers,
-    std::vector<float>& rInverseAvgLayers,
-    std::vector<float>& rAvgLayersDelta,
-    std::vector<float>& rInverseAvgLayersDelta) const
-{
-    // Go over frames and extract average layer of atoms
-    std::vector<float> avgLayers = std::vector<float>(mGPUSurfaces.size(), -1.f); // minus one means no data
-    std::vector<float> invAvgLayers = std::vector<float>(mGPUSurfaces.size(), -1.f); // minus one means no data
-
-    for(int frame = mComputedStartFrame; frame <= mComputedEndFrame; frame++)
-    {
-        // Relative frame
-        int relativeFrame = frame - mComputedStartFrame;
-
-        // Do it only when layers were extracted for this frame
-        if(mGPUSurfaces.at(relativeFrame)->layersExtracted())
-        {
-            // Calculate layer of atoms in rage for that frame
-            float avgLayer = 0;
-            float invAvgLayer = 0;
-            for(int atomIndex = startIndex; atomIndex <= endIndex; atomIndex++)
-            {
-                // Get layer of that atom
-                int layer = mGPUSurfaces.at(relativeFrame)->getLayerOfAtom(atomIndex);
-                int invLayer = (mGPUSurfaces.at(relativeFrame)->getLayerCount() - 1) - layer;
-
-                // Accumulate for average layer calculation
-                avgLayer += (float)layer;
-                invAvgLayer += (float)invLayer;
-            }
-            avgLayers.at(relativeFrame) = avgLayer / (float)((endIndex - startIndex) + 1); // divide through count of atoms
-            invAvgLayers.at(relativeFrame) = invAvgLayer / (float)((endIndex - startIndex) + 1); // divide through count of atoms
-        }
-    }
-
-    // Store deltas to vectors
-    std::vector<float> avgLayersDelta = std::vector<float>(avgLayers.size() - 1, -1.f); // minus one means no data
-    std::vector<float> invAvgLayersDelta = std::vector<float>(invAvgLayers.size() - 1, -1.f); // minus one means no data
-
-    // Average layers delta accumulation
-    float avgLayersDeltaAcc = 0.f;
-    for(int i = 0; i < avgLayers.size() - 1; i++)
-    {
-        // Return false if any avg is not ok
-        if(avgLayers.at(i) < 0 || avgLayers.at(i+1) < 0) { return false; }
-
-        float delta = avgLayers.at(i + 1) - avgLayers.at(i);
-        delta = delta < 0 ? -delta : delta;
-        avgLayersDelta.at(i) = delta;
-        avgLayersDeltaAcc += delta;
-    }
-
-    // Inverse average delta accumulation
-    float invAvgLayersDeltaAcc = 0.f;
-    for(int i = 0; i < invAvgLayers.size() - 1; i++)
-    {
-        // Return false if any invAvg is not ok
-        if(invAvgLayers.at(i) < 0 || invAvgLayers.at(i+1) < 0) { return false; }
-
-        float delta = invAvgLayers.at(i + 1) - invAvgLayers.at(i);
-        delta = delta < 0 ? -delta : delta;
-        invAvgLayersDelta.at(i) = delta;
-        invAvgLayersDeltaAcc += delta;
-    }
-
-    // Return results
-    rAcc = avgLayersDeltaAcc;
-    rInverseAcc = invAvgLayersDeltaAcc;
-    rAvgLayers = avgLayers;
-    rInverseAvgLayers = invAvgLayers;
-    rAvgLayersDelta = avgLayersDelta;
-    rInverseAvgLayersDelta = invAvgLayersDelta;
-    return true;
-}
-
 // ### Main function ###
-
 int main(int argc, char* argv[])
 {
     if(argc < 2)
     {
-        std::cout << "Please give PDB and optional XTC file as argument" << std::endl;
+        Logger::instance().print("Please give PDB and optional XTC file as argument");
     }
     else
     {

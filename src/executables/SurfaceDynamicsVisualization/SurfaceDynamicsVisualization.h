@@ -18,9 +18,12 @@
 #include "Framebuffer.h"
 #include "Path.h"
 #include "SurfaceExtraction/GPUHullSamples.h"
+#include "Utils/Logger.h"
+#include "SurfaceExtraction/GPURenderTexture.h"
 
 // Notes:
 // - Calculations done in angstrom
+// - Some shaders do not need mesh data and do not bind a VAO. The currently bound VAO is left bound and not used
 
 // TODO:
 // - averageLayersDeltaAccumulation and updateGroupAnalysis share functionality. Try to merge!
@@ -53,14 +56,14 @@ private:
     // Enumeration for rendering
     enum Rendering
     {
-        HULL, ASCENSION, ELEMENTS, AMINOACIDS, ANALYSIS, LAYERS
+        HULL, ASCENSION, ELEMENTS, AMINOACIDS, ANALYSIS, LAYERS, RESIDUE_SURFACE_PROXIMITY
     };
 
     // Enumeration for background cubemaps
     enum Background
     {
-        NONE, SCIENTIFIC, COMPUTERVISUALISTIK, BEACH
-    };    
+        NONE, SCIENTIFIC, COMPUTERVISUALISTIK, BEACH, WHITE
+    };
 
     // Keyboard callback for GLFW
     void keyCallback(int key, int scancode, int action, int mods);
@@ -101,6 +104,9 @@ private:
     // Update group analysis
     void updateGroupAnalysis();
 
+    // Update amino acids analysis
+    void updateAminoAcidsAnaylsis();
+
     // Get whether frame was computed (otherwise prohibit doing thing which would go wrong)
     bool frameComputed() const { return (mFrame >= mComputedStartFrame) && (mFrame <= mComputedEndFrame); }
 
@@ -115,18 +121,6 @@ private:
         std::string filepathNegY,
         std::string filepathPosZ,
         std::string filepathNegZ) const;
-
-    // Atoms in range calculations. Returns whether successful
-    bool atomsInRangeCalculations(
-        int startIndex, // index of atom at start of range
-        int endIndex, // index of atom at end of range
-        float& rAcc, // average layers delta accumulation
-        float& rInverseAcc, // inverse average layers delta accumulation
-        std::vector<float>& rAvgLayers, // average layers
-        std::vector<float>& rInverseAvgLayers, // inverse average layers
-        std::vector<float>& rAvgLayersDelta, // average layers delta
-        std::vector<float>& rInverseAvgLayersDelta // inverse average layers delta
-        ) const;
 
     // Setup
     const float mCameraSmoothDuration = 1.5f;
@@ -159,6 +153,7 @@ private:
     const glm::vec3 mSelectionColor = glm::vec3(0.2f, 1.0f, 0.0f);
     const bool mFrameLogging = false;
     const std::string mNoComputedFrameMessage = "Frame was not computed.";
+    const GLuint mKBufferLayerCount = 32; // remember to adapt value in shaders as well
 
     // Colors for rendering layers (outer to inner, repeating if too many)
     const std::vector<glm::vec3> mLayerColors =
@@ -211,7 +206,7 @@ private:
     int mPathFrameRadius = 5; // radius of frames which are visualized
     int mPathSmoothRadius = 0; // radius of frames which are used for smoothing the path
     Rendering mRendering = HULL;
-    Background mBackground = SCIENTIFIC;
+    Background mBackground = WHITE;
     int mHullSampleCount = 250; // sample count per atom
     bool mRenderHullSamples = false;
     bool mRenderOutline = true;
@@ -274,6 +269,7 @@ private:
     GLuint mScientificCubemapTexture;
     GLuint mCVCubemapTexture;
     GLuint mBeachCubemapTexture;
+    GLuint mWhiteCubemapTexture;
 
     // Framebuffer
     std::unique_ptr<Framebuffer> mupMoleculeFramebuffer;
@@ -307,13 +303,34 @@ private:
     int mSurfaceValidationSampleCount = 0;
 
     // Texture for rendering group atoms on top of molecule
-    GLuint mGroupRenderingTexture;
+    std::unique_ptr<GPURenderTexture> mupGroupRenderingTexture;
     std::unique_ptr<GPUTextureBuffer> mupGroupRenderingSemaphore;
+
+    // Residue surface proximity rendering buffers
+    std::unique_ptr<GPURenderTexture> mupKBufferCounter;
+    std::unique_ptr<GPURenderTexture> mupKBufferTexture;
+    std::unique_ptr<GPUBuffer<GLfloat> > mupLayersDeltaBuffer;
 
     // Ascension helper texture
     GLuint mAscensionHelperTexture;
     int mAscensionHelperWidth = 0;
     int mAscensionHelperHeight = 0;
+
+    // Amino acid calculations
+    struct AminoAcidAnalysis
+    {
+        std::string name = "";
+        int startIndex = -1;
+        int endIndex = -1;
+        float averageLayersDeltaAccumulation = -1;
+        float inverseAverageLayersDeltaAccumulation = -1;
+        std::vector<float> averageLayers;
+        std::vector<float> inverseAverageLayers;
+        std::vector<float> averageLayersDelta;
+        std::vector<float> inverseAverageLayersDelta;
+    };
+    std::vector<AminoAcidAnalysis> mAminoAcidAnalysis;
+
 };
 
 #endif // SURFACE_DYNAMICS_VISUALIZATION_H

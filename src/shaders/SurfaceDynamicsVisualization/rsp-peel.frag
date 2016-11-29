@@ -1,21 +1,40 @@
-//============================================================================
-// Distributed under the MIT License. Author: Raphael Menges
-//============================================================================
+// Adapted by Raphael Menges
+// Most parts taken from following software:
+//
+//  Software is distributed under the following BSD-style license:
+//
+//  Authors: Andreas A. Vasilakis - Georgios Papaioannou - Ioannis Fudos
+//  Emails : abasilak@aueb.gr - gepap@aueb.gr - fudos@cs.uoi.gr
+//
+//  Copyright � 2015. Athens University of Economics & Business, All Rights Reserved.
+//
+//  Redistribution and use in source and binary forms, with or without modification, are permitted provided that the following conditions are met:
+//
+//  1. Redistributions of source code must retain the above copyright notice, this list of conditions and the following disclaimer.
+//
+//  2. Redistributions in binary form must reproduce the above copyright notice, this list of conditions and the following disclaimer in the
+//	documentation and/or other materials provided with the distribution.
+//
+//  3. The name of the author may not be used to endorse or promote products derived from this software without specific prior written permission.
+//
+//  THIS SOFTWARE IS PROVIDED BY THE CONTRIBUTORS "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO,
+//  THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE DISCLAIMED.
+//  IN NO EVENT SHALL THE AUTHOR BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES
+//  (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION)
+//  HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING
+//  IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+//
+//	This research has been co-financed by the European Union (European Social Fund - ESF) and Greek
+//	national funds through the Operational Program ``Education and Lifelong Learning'' of the National
+//	Strategic Reference Framework (NSRF) - Research Funding Program: ARISTEIA II-GLIDE (grant no.3712).
+//
+//--------------------------------------------------------------------------------------
 
-#version 430
+// Does NOT support following features
+// - Generating of pick index, so no mouse picking possible
+// - Drawing into group rendering image
 
-// In / out
-in vec2 uv;
-flat in float radius;
-flat in vec3 center;
-flat in vec4 color;
-flat in int index;
-layout(location = 0) out vec4 fragColor;
-layout(location = 1) out vec3 pickIndex;
-out float gl_FragDepth; // No information about less because may not be discared
-                        // before checked whether atom is part of analysis group
-                        // and whether fragment inserted in image for rendering
-                        // group atoms on top of molecule.
+#version 450
 
 // Group indicator
 layout(std430, binding = 2) restrict readonly buffer GroupIndicatorBuffer
@@ -23,11 +42,16 @@ layout(std430, binding = 2) restrict readonly buffer GroupIndicatorBuffer
   float groupIndicator[];
 };
 
-// Group rendering texture as image
-layout(binding = 3, rgba32f) restrict coherent uniform image2D GroupRenderingImage;
+// Output images for k-Buffer
+layout(binding = 3, r32ui) restrict coherent uniform uimage2D KBufferCounter;
+layout(binding = 4, rg32f) writeonly restrict uniform image2DArray KBuffer;
 
-// Semaphore for group rendering
-layout(binding = 4, r32ui) restrict coherent uniform uimageBuffer GroupRenderingSemaphore;
+// In / out
+in vec2 uv;
+flat in float radius;
+flat in vec3 center;
+flat in vec4 color;
+flat in int index;
 
 // Uniforms
 uniform float time;
@@ -40,7 +64,27 @@ uniform float depthDarkeningStart;
 uniform float depthDarkeningEnd;
 uniform float highlightMultiplier;
 uniform vec4 highlightColor;
-uniform int framebufferWidth;
+
+// Incremention of counter which counts pixels in k-Buffer
+uint addPixelFragCounter()
+{
+    return imageAtomicAdd(KBufferCounter, ivec2(gl_FragCoord.xy), 1U);
+}
+
+// Sets fragment in key buffer
+void setPixelFragValue(const int coord_z, const vec4 val)
+{
+    // Image array interpeted as 3D structure
+    imageStore(KBuffer, ivec3(gl_FragCoord.xy, coord_z), val);
+}
+
+// Submit pixel value to k-Buffer
+void submitPixelFragValueToOIT(vec4 val, float zValue)
+{
+    float C = uintBitsToFloat(packUnorm4x8(vec4(val))); // pack 32bit RGBA into single float
+    int index = int(addPixelFragCounter()); // increment pixel counter for processed fragment and get valid k-Buffer index for current value
+    setPixelFragValue(index, vec4(C, zValue, 0.0f, 0.0f)); // add value to k-Buffer
+}
 
 // Main function
 void main()
@@ -98,7 +142,6 @@ void main()
         float projDepth = projPos.z / projPos.w;
         customDepth = (projDepth + 1.0) * 0.5; // gl_FragCoord.z is from 0..1. So go from clip space to viewport space
     }
-    gl_FragDepth = customDepth;
 
     // Depth darkening
     float depthDarkening = (-viewPos.z - depthDarkeningStart) / (depthDarkeningEnd - depthDarkeningStart);
@@ -132,62 +175,7 @@ void main()
     float highlight = (sin((((gl_FragCoord.x + gl_FragCoord.y)* 3.14) / 8.0) +  (8.f * time)) + 1.0) / 2.0;
     finalColor = mix(finalColor, highlightColor.rgb, highlightColor.a * groupIndicator[index] * 0.5 * highlight * highlightMultiplier);
 
-    // Output group rendering fragment
-    if(groupIndicator[index] > 0)
-    {
-        // Pixel coordinate of current fragment
-        ivec2 pixelCoordinate = ivec2(gl_FragCoord.x, gl_FragCoord.y);
-
-        // Depth of current fragment
-        float groupRenderingDepth = 1.0 - customDepth; // inverse depth since texture is initialized with zero and would be already at near plane
-
-        // Get linear coordinate in semaphore
-        int semaphoreCoordinate = (framebufferWidth * pixelCoordinate.y) + pixelCoordinate.x;
-
-        // Write value to image
-        uint locked = 0u;
-        bool done = false;
-        int iteration = 0;
-        while(!done && iteration < 10)
-        {
-            // Try to lock
-            locked = imageAtomicExchange(GroupRenderingSemaphore, semaphoreCoordinate, 1u);
-
-            // Proceed if successful
-            if(locked == 0u)
-            {
-                // Fetch current depth value from image and decide whether to overwrite stored value
-                float prevGoupRenderingDepth = float(imageLoad(GroupRenderingImage, pixelCoordinate).a);
-                if(prevGoupRenderingDepth < groupRenderingDepth)
-                {
-                   imageStore(GroupRenderingImage, pixelCoordinate, vec4(finalColor.rgb, groupRenderingDepth));
-                }
-
-                memoryBarrier(); // guarantee that value is written to image
-
-                // Reset semaphore
-                imageAtomicExchange(GroupRenderingSemaphore, semaphoreCoordinate, 0u);
-
-                // Mark as done for this execution
-                done = true;
-            }
-            else
-            {
-                iteration++;
-            }
-        }
-    }
-
-    // Output color
-    fragColor = vec4(finalColor, color.a);
-
-    // Output pickIndex
-    int rawPickIndex = index + 1; // add one to distinguish from nothing
-    int r = (rawPickIndex & 0x000000FF) >>  0;
-    int g = (rawPickIndex & 0x0000FF00) >>  8;
-    int b = (rawPickIndex & 0x00FF0000) >> 16;
-    pickIndex = vec3(
-        float(r) / 255.0,
-        float(g) / 255.0,
-        float(b) / 255.0);
+    // Output color into k-Buffer
+    submitPixelFragValueToOIT(vec4(finalColor, color.a), customDepth);
 }
+
