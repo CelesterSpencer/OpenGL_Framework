@@ -17,8 +17,8 @@ public:
     float atomSymbolIndex;
     float bondNeighborsStart;
     float bondNeighborsSize;
-    float charge;
-    glm::vec4 proteinID;
+    float proteinID;
+    glm::vec4 charge;
 };
 
 #endif //OPENGL_FRAMEWORK_SIMPLEATOM_H

@@ -58,6 +58,8 @@ GLuint m_atomsSSBO;
 GLuint m_indexCubeSSBO;
 GLuint m_valuesVectorSSBO;
 GLuint m_bondNeighborsSSBO;
+ShaderProgram m_calcChargeProgram;
+uint m_numberOfAtomSymbols;
 
 // rendering
 glm::vec3   m_lightDirection;
@@ -290,6 +292,15 @@ void run()
         glUnmapBuffer(GL_SHADER_STORAGE_BUFFER);
 
         /*
+         * update charge
+         */
+        m_calcChargeProgram.use();
+        m_calcChargeProgram.update("numAtoms", m_proteinLoader.getNumberOfAllAtoms());
+        //m_calcChargeProgram.update("numAtomSymbols", (int)m_numberOfAtomSymbols);
+        glDispatchCompute(ceil(m_proteinLoader.getNumberOfAllAtoms()/256.0), 1, 1);
+        glMemoryBarrier (GL_ALL_BARRIER_BITS);
+
+        /*
          * draw proteins as impostor
          */
         glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 0, m_atomsSSBO);
@@ -299,7 +310,7 @@ void run()
         m_impostorProgram.update("cameraWorldPos", mp_camera->getPosition());
         m_impostorProgram.update("probeRadius", 0.f);
         m_impostorProgram.update("lightDir", m_lightDirection);
-        m_impostorProgram.update("proteinNum", (int)m_proteinLoader.getNumberOfProteins());
+        //m_impostorProgram.update("proteinNum", (int)m_proteinLoader.getNumberOfProteins());
         glDrawArrays(GL_POINTS, 0, (GLsizei)m_proteinLoader.getNumberOfAllAtoms());
 
         /*
@@ -401,6 +412,7 @@ int main()
     std::string filepath = basePath + "/forcefieldParameters/" + "gaff.dat";
     AmberForceFieldParameterLoader amberForceFieldParameterLoader;
     amberForceFieldParameterLoader.load(filepath, amberForceFieldParameter);
+    m_numberOfAtomSymbols = amberForceFieldParameter.getNumberOfAtomSymbols();
 
     /*
      * general setup
@@ -411,6 +423,7 @@ int main()
      * compile shader programs
      */
     m_impostorProgram     = ShaderProgram("/AmberForceFieldVisualization/impostor.vert", "/AmberForceFieldVisualization/impostor.geom", "/AmberForceFieldVisualization/impostor.frag");
+    m_calcChargeProgram   = ShaderProgram("/AmberForceFieldVisualization/amberff.comp");
     GLenum err = glGetError();
     if (err != GL_NO_ERROR) {
         //Logger::instance().print("GLerror after init shader programs: " + std::to_string(err), Logger::Mode::ERROR);

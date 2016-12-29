@@ -142,6 +142,7 @@ public:
     std::vector<uint> &getIndexCube() { return m_indexCube; }
     std::vector<glm::vec4> &getValuesList() { return m_valuesList; }
     std::map<std::string, uint> &getAtomSymbolsMap() { return m_atomSymbolsMap; };
+    uint getNumberOfAtomSymbols() { return m_size; }
 };
 
 #endif //MOLECULARDYNAMICSVISUALIZATION_AMBERFORCEFIELDPARAMETER_H

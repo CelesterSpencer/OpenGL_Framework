@@ -37,6 +37,8 @@ private:
         tokens = std::vector<std::string>(iter, end);
     }
 
+    uint m_numberOfAtomSymbols;
+
 public:
     void load(std::string & filename, AmberForceFieldParameter & amberParameters);
 };

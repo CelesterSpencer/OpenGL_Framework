@@ -16,8 +16,8 @@ struct AtomStruct
     float atomSymbolIndex;
     float bondNeighborsStart;
     float bondNeighborsSize;
-    float charge;
-    vec2 proteinID;
+    float proteinID;
+    vec4 charge;
 };
 
 // SSBOs
@@ -44,12 +44,16 @@ void main()
 
     /*
      * color selected atom different to all atoms
-     */
-    float proteinIdx = atoms[index].proteinID.x;
+
+    float proteinIdx = atoms[index].proteinID;
     float PI = 3.1415926;
     float colorF = PI*(float(proteinIdx)/proteinNum);
     float sinC = sin(colorF);
     float cosC = cos(colorF);
     vec3 proteinColor = vec3(sinC, cosC, min(1,sinC+cosC));
     vertColor = proteinColor;
+    */
+
+    //vertColor = normalize(atoms[index].charge.xyz) * 255;
+    vertColor = normalize(atoms[index].charge.xyz);
 }

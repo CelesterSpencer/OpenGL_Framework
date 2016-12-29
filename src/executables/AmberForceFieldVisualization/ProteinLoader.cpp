@@ -297,9 +297,9 @@ void ProteinLoader::loadPDB(std::string filePath, SimpleProtein &protein, std::m
             SimpleAtom atom;
             atom.pos = position;
             atom.radius = radius;
-            atom.charge = 0;
+            atom.charge = glm::vec4(1.0,0.0,0.0,0.0);
             atom.atomSymbolIndex = atomSymbolsMap[elementName];
-            atom.proteinID = glm::vec4(m_currentProteinIdx, m_currentProteinIdx, m_currentProteinIdx, m_currentProteinIdx);
+            atom.proteinID = m_currentProteinIdx;
 
             /*
              * get all neighbors
