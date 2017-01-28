@@ -1,0 +1,674 @@
+#version 430
+
+#define GRID_UNDEF 4294967295
+#define M_PI 3.1415926535897932384626433832795
+#define EPSILON 0.00001
+#define MAX_LIMIT 1000
+
+layout(local_size_x = 256, local_size_y = 1, local_size_z = 1) in;
+
+// Struct for atom
+struct AtomStruct
+{
+    vec3  center;
+    float radius;
+    float atomSymbolIndex;
+    float bondNeighborsStart;
+    float bondNeighborsSize;
+    float proteinID;
+    vec4  charge;
+};
+
+layout(std430, binding = 0) buffer AtomsBuffer      { AtomStruct atoms[];  };
+layout(std430, binding = 1) buffer IndexCubeBuffer  { uint indexCube[];    };
+layout(std430, binding = 2) buffer ValuesBuffer     { vec4 valuesVector[]; };
+layout(std430, binding = 3) buffer NeighborsBuffer  { uint neighbors[];    };
+
+layout(std430, binding = 4) buffer GridcellsBuffer       { uint gcell[];     };
+layout(std430, binding = 5) buffer GridindicesBuffer     { uint gndx[];      };
+layout(std430, binding = 6) buffer GridcountBuffer       { int  gridcnt[];   };
+layout(std430, binding = 7) buffer GridoffsetBuffer      { int  gridoff[];   };
+layout(std430, binding = 8) buffer GridBuffer            { uint grid[];      };
+layout(std430, binding = 9) buffer UnsortedIndexBuffer   { uint undx[];      };
+
+uniform int numAtoms;
+uniform int numAtomSymbols;
+uniform float searchRadius2; // radius^2
+uniform int gridAdjCnt;
+uniform int searchCellOff;
+uniform int gridAdj[216];
+
+uniform bool useSimplifiedCalculation;
+
+int getIndex(int x, int y, int z, int w) {
+    return x + y*numAtomSymbols + z*numAtomSymbols*numAtomSymbols + w*numAtomSymbols*numAtomSymbols*numAtomSymbols;
+}
+
+// rodrigues rotation formula
+vec3 rotateVector(in vec3 v, in vec3 k, float theta)
+{
+    return v*cos(theta) + cross(k, v)*sin(theta) + k*dot(k,v)*(1-cos(theta));
+}
+
+void calcBond(
+    in AtomStruct a1,
+    in AtomStruct a2,
+    in int isI,
+    in int isJ,
+    inout vec3 resDir)
+{
+    vec4 entry = valuesVector[indexCube[getIndex(int(a1.atomSymbolIndex), int(a2.atomSymbolIndex), 0, 0)]];
+    float k = entry.x;
+    float r0 = entry.y;
+
+    vec3 r = a2.center - a1.center;
+
+    vec3 f1 = 2*k*(length(r) - r0) * r / length(r);
+    vec3 f2 = -f1;
+
+    resDir = resDir + (isI*f1) + (isJ*f2);
+}
+
+void calcBondSimple(
+    in AtomStruct a1,
+    in AtomStruct a2,
+    inout vec3 resDir)
+{
+    vec4 entry = valuesVector[indexCube[getIndex(int(a1.atomSymbolIndex), int(a2.atomSymbolIndex), 0, 0)]];
+    float r0 = entry.y;
+
+    vec3 dir = a2.center - a1.center;
+    float r = length(dir);
+    dir = normalize(dir);
+    float halfDiff = (r-r0) / 2.0;
+
+    resDir = resDir + (dir*halfDiff);
+}
+
+void calcVdW(
+    in AtomStruct a1,
+    in AtomStruct a2,
+    in int isI,
+    in int isJ,
+    inout vec3 resDir)
+{
+    vec4 entry1 = valuesVector[indexCube[getIndex(0, int(a1.atomSymbolIndex), 0, 0)]];
+    vec4 entry2 = valuesVector[indexCube[getIndex(0, int(a2.atomSymbolIndex), 0, 0)]];
+    float sigma = entry1.x + entry2.x;
+    float epsilon = sqrt(entry1.y * entry2.y);
+    vec3 r = a2.center - a1.center;
+
+    float scale = 48*epsilon*(pow(sigma/length(r),12) - 0.5*pow(sigma/length(r),6)) / (length(r)*length(r));
+    vec3 f1 = scale*r;
+    vec3 f2 = -f1;
+
+    resDir = resDir + (isI*f1) + (isJ*f2);
+}
+
+void calcAngle(
+    in AtomStruct a1,
+    in AtomStruct a2,
+    in AtomStruct a3,
+    in int isI,
+    in int isJ,
+    in int isK,
+    inout vec3 resDir)
+{
+    vec4 entry = valuesVector[indexCube[getIndex(int(a1.atomSymbolIndex), int(a2.atomSymbolIndex), int(a3.atomSymbolIndex), 0)]];
+    float k = entry.x;
+    float a0 = entry.y;
+
+    vec3 v1 = a2.center - a1.center;
+    vec3 v2 = a3.center - a2.center;
+    float alpha = max(acos(dot(v1,v2) / (length(v1) * length(v2))), EPSILON); // if alpha is zero, set it to the smallest non zero number
+
+    vec3 f1 = -2*k*(alpha-a0) / (length(v1) * sin(alpha)) * (v2 - (cos(alpha)*v1));
+    vec3 f3 = -2*k*(alpha-a0) / (length(v2) * sin(alpha)) * (v1 - (cos(alpha)*v2));
+    vec3 f2 = -f1 -f3;
+
+    resDir = resDir + (isI*f1) + (isJ*f2) + (isK*f3);
+}
+
+
+void calcAngleSimple(
+    in AtomStruct a1,
+    in AtomStruct a2,
+    in AtomStruct a3,
+    in int isI,
+    in int isJ,
+    inout vec3 resDir)
+{
+    vec4 entry = valuesVector[indexCube[getIndex(int(a1.atomSymbolIndex), int(a2.atomSymbolIndex), int(a3.atomSymbolIndex), 0)]];
+    float a0 = entry.y;
+
+    vec3 v1 = a1.center - a2.center;
+    vec3 v2 = a3.center - a2.center;
+
+    vec3 rotationAxis = normalize(cross(v2,v1));
+    float theta = max(acos(dot(v1,v2) / (length(v1) * length(v2))), EPSILON);
+    float deltaAngle = a0 - theta;
+
+    vec3 vRot = rotateVector(v1, rotationAxis, deltaAngle);
+    vec3 f1 = vRot - v1;
+    vec3 f2 = vec3(0.0,0.0,0.0);
+
+    resDir = resDir + (isI*f1) + (isJ*f2);
+}
+
+void calcDihedral(
+    in AtomStruct a1,
+    in AtomStruct a2,
+    in AtomStruct a3,
+    in AtomStruct a4,
+    in int isI,
+    in int isJ,
+    in int isK,
+    in int isL,
+    inout vec3 resDir)
+{
+    vec4 entry = valuesVector[indexCube[getIndex(int(a1.atomSymbolIndex), int(a2.atomSymbolIndex), int(a3.atomSymbolIndex), int(a4.atomSymbolIndex))]];
+    float k = entry.x;
+    float n = entry.w;
+    float delta = entry.z;
+
+    // HERE IS STILL SOME BUG
+    if (!(isnan(k) || isinf(k) || isnan(n) || isinf(n) || isnan(delta) || isinf(delta))) // CHECK IF ENTRY IS INVALID
+    {
+        vec3 r1 = a2.center - a1.center;
+        vec3 r2 = a3.center - a2.center;
+        vec3 r3 = a4.center - a3.center;
+
+        vec3 a = cross(r1,r2);
+        vec3 b = cross(r2,r3);
+        vec3 c = cross(r2,a);
+
+        // prevent dividing by 0, to set length to a small epsilon when it would be 0
+        float lenA  = max(length(a), EPSILON);
+        float lenB  = max(length(b), EPSILON);
+        float lenC  = max(length(c), EPSILON);
+        float lenAB = max(lenA*lenB, EPSILON);
+        float lenBC = max(lenB*lenC, EPSILON);
+
+        float cosa = dot(a,b) / (lenAB);
+        float sina = dot(c,b) / (lenBC);
+        float alpha = atan(sina, cosa);
+
+        vec3 ds  = (b - (cosa * a)) / lenA;
+        vec3 db  = (a - (cosa * b)) / lenB;
+        float mu = -k * n * sin(n*alpha - delta) / sina;
+
+        vec3 f1 = -mu * cross(r2,ds);
+        vec3 f2 =  mu * (cross(r2,ds) - cross(db,r2));
+        vec3 f3 =  mu * (cross(db,r2) - cross(ds,r1) - cross(r3,db));
+        vec3 f4 =  mu * (cross(ds,r1) + cross(r3,db));
+
+        resDir = resDir + (isI*f1) + (isJ*f2) + (isK*f3) + (isL*f4);
+    }
+}
+
+void calcDihedralSimple(
+    in AtomStruct a1,
+    in AtomStruct a2,
+    in AtomStruct a3,
+    in AtomStruct a4,
+    in int isI,
+    in int isJ,
+    inout vec3 resDir)
+{
+    vec4 entry = valuesVector[indexCube[getIndex(int(a1.atomSymbolIndex), int(a2.atomSymbolIndex), int(a3.atomSymbolIndex), int(a4.atomSymbolIndex))]];
+    float theta = entry.z;
+
+    vec3 v1 = a1.center - a2.center;
+    vec3 v2a = a3.center - a2.center;
+    vec3 v2b = - v2a;
+    vec3 v3 = a4.center - a3.center;
+
+    // calculate normals of both planes
+    vec3 n1 = normalize(cross(v1,v2a));
+    vec3 n2 = normalize(cross(v3,v2b));
+
+    // calculate dihedral angle between two planes
+    float phi = acos(- dot(n1, n2)); // phi = acos( -n1*n2 / (|n1|*|n2|) ), |n1|*|n2|=1
+
+    // calculate the rotation angle
+    float delta = (theta - phi) / 2.0;
+
+    // calculate the rotation axis
+    vec3 rotationAxis = normalize(cross(v3,v1));
+
+    // rotate the vector to its equilibrium angle
+    vec3 vecRot = rotateVector(v1, rotationAxis, delta);
+
+    // calculate the difference vector
+    vec3 f1 = vecRot - v1;
+    vec3 f2 = vec3(0.0, 0.0, 0.0);
+
+    resDir = resDir + (isI*f1) + (isJ*f2);
+}
+
+void calcImpropers(
+    in AtomStruct a1,
+    in AtomStruct a2,
+    in AtomStruct a3,
+    in AtomStruct a4,
+    in int isI,
+    in int isJ,
+    in int isK,
+    in int isL,
+    inout vec3 resDir)
+{
+    vec4 entry = valuesVector[indexCube[getIndex(int(a1.atomSymbolIndex), int(a2.atomSymbolIndex), int(a3.atomSymbolIndex), int(a4.atomSymbolIndex))]];
+    float s0 = entry.z;
+    float k  = entry.y;
+    float n  = entry.w;
+
+    vec3 r1 = a2.center - a1.center;
+    vec3 r2 = a3.center - a2.center;
+    vec3 r3 = a4.center - a3.center;
+    vec3 r4 = a4.center - a1.center;
+
+    vec3 a  = cross(r1,r2);
+    vec3 b  = cross(r2,r3);
+    vec3 c  = cross(r2,a);
+    vec3 d  = cross(r4,r1);
+
+    float lenA  = max(length(a), EPSILON);
+    float lenB  = max(length(b), EPSILON);
+    float lenC  = max(length(c), EPSILON);
+    float lenD  = max(length(d), EPSILON);
+    float lenAB = max(lenA*lenB, EPSILON);
+    float lenBC = max(lenB*lenC, EPSILON);
+    float lenAD = max(lenA*lenD, EPSILON);
+
+    float cosa = max(dot(a,b) / lenAB, EPSILON);
+    float sina = max(dot(c,b) / lenBC, EPSILON);
+    float alpha = atan(sina,cosa);
+
+    vec3 ds  = (b - (cosa * a)) / lenA;
+    vec3 db  = (a - (cosa * b)) / lenB;
+    float s   = dot(a,d) / lenAD;
+    float mu = 2 * k * (s - s0);
+
+    vec3 f1 = -mu * cross(r2,ds);
+    vec3 f2 =  mu * (cross(r2,ds) - cross(db,r2));
+    vec3 f3 =  mu * (cross(db,r2) - cross(ds,r1) - cross(r3,db));
+    vec3 f4 =  mu * (cross(ds,r1) + cross(r3,db));
+
+    resDir = resDir + (isI*f1) + (isJ*f2) + (isK*f3) + (isL*f4);
+}
+
+void calcImpropersSimple(
+    in AtomStruct a1,
+    in AtomStruct a2,
+    in AtomStruct a3,
+    in AtomStruct a4,
+    in int isI,
+    in int isL,
+    inout vec3 resDir)
+{
+    vec4 entry = valuesVector[indexCube[getIndex(int(a1.atomSymbolIndex), int(a2.atomSymbolIndex), int(a3.atomSymbolIndex), int(a4.atomSymbolIndex))]];
+    float theta = entry.z;
+
+    vec3 v1 = a2.center - a4.center;
+    vec3 v2 = a3.center - a4.center;
+    vec3 v3 = a3.center - a2.center;
+    vec3 v4 = a1.center - a2.center;
+
+    // calculate normals of both planes
+    vec3 n1 = normalize(cross(v1,v2));
+    vec3 n2 = normalize(cross(v3,v4));
+
+    // calculate dihedral angle between two planes
+    float phi = acos(- dot(n1, n2)); // phi = acos( -n1*n2 / (|n1|*|n2|) ), |n1|*|n2|=1
+
+    // calculate the rotation angle
+    float delta = (theta - phi) / 2.0;
+
+    // calculate the rotation axis
+    vec3 rotationAxis = normalize(cross(-v1,v4));
+
+    // rotate the vector to its equilibrium angle
+    vec3 vecRot = rotateVector(v4, rotationAxis, delta);
+
+    // calculate the difference vector
+    vec3 f1 = vecRot - v4;
+    vec3 f2 = vec3(0.0, 0.0, 0.0);
+
+    resDir = resDir + (isI*f1) + (isL*f2);
+}
+
+int getClosestAtomIdx(int idx, vec3 pos, int proteinID)
+{
+    int closestAtomIdx = -1;
+    float closestDistance = searchRadius2 + 1;
+
+    uint sortedIdx = grid[idx];
+    uint centerCell = gcell[sortedIdx];
+    if (centerCell != GRID_UNDEF)
+    {
+        uint startCell = centerCell - searchCellOff;
+
+        // iterate over all neighbors
+        for (int cellIdx = 0; cellIdx < gridAdjCnt; cellIdx++)
+        {
+            uint currentCell = startCell + gridAdj[cellIdx];
+            uint firstNeighborIdx = gridoff[currentCell];
+            uint lastNeighborIdx  = firstNeighborIdx + gridcnt[currentCell];
+
+            // iterate over all atoms
+            for (uint sortedNeighborIdx = firstNeighborIdx; sortedNeighborIdx < lastNeighborIdx; sortedNeighborIdx++)
+            {
+                uint unsortedNeighborIdx = undx[sortedNeighborIdx];
+
+                // is the neighbor atom within search radius?
+                AtomStruct currentNeighborAtom = atoms[unsortedNeighborIdx];
+                vec3 currentNeighborPos = currentNeighborAtom.center;
+                vec3 distance = pos - currentNeighborPos;
+                float d2 = (distance.x * distance.x) + (distance.y * distance.y) + (distance.z * distance.z);
+                if (d2 < searchRadius2 && d2 < closestDistance)
+                {
+                    // is the atom different from the selected atom?
+                    if (idx != unsortedNeighborIdx)
+                    {
+                        int  currentAtomProteinID = int(currentNeighborAtom.proteinID);
+
+                        // do the atoms belong to different proteins?
+                        if (proteinID != currentAtomProteinID)
+                        {
+                            closestDistance = d2;
+                            closestAtomIdx = int(unsortedNeighborIdx);
+                        }
+                    }
+                }
+            }
+
+        }
+    }
+
+    return closestAtomIdx;
+}
+
+void main() {
+    // get element index
+    int curAtomIdx = int(gl_GlobalInvocationID.x);
+    if(curAtomIdx > numAtoms) return;
+
+    vec3 resultDir = vec3(0.0, 0.0, 0.0);
+
+    // get current atom and its neighbors
+    AtomStruct curAtom = atoms[curAtomIdx];
+    int neighborsStart = int(curAtom.bondNeighborsStart);
+    int neighborsNum = int(curAtom.bondNeighborsSize);
+
+    /*
+     * calc bond and vdW forces
+     */
+    for (int i = 0; i < neighborsNum; i++)
+    {
+        AtomStruct neighborAtom = atoms[neighbors[neighborsStart+i]];
+        if (useSimplifiedCalculation)
+        {
+            calcBondSimple(curAtom, neighborAtom, resultDir);
+            calcVdW(curAtom, neighborAtom, 1, 0, resultDir);
+        }
+        else
+        {
+            calcBond(curAtom, neighborAtom, 1, 0, resultDir);
+            calcVdW(curAtom, neighborAtom, 1, 0, resultDir);
+        }
+
+    }
+
+    /*
+     * calc angle forces
+     */
+    // case: current atom is in the middle 1-c-2
+    for (int i = 0; i < neighborsNum-1; i++)
+    {
+        for (int j = i+1; j < neighborsNum; j++)
+        {
+            AtomStruct neighborAtom1 = atoms[neighbors[neighborsStart+i]];
+            AtomStruct neighborAtom2 = atoms[neighbors[neighborsStart+j]];
+            if (useSimplifiedCalculation)
+            {
+                calcAngleSimple(neighborAtom1, curAtom, neighborAtom2, 0, 1, resultDir);
+            }
+            else
+            {
+                calcAngle(neighborAtom1, curAtom, neighborAtom2, 0, 1, 0, resultDir);
+            }
+        }
+    }
+    // case: current atom is on one of the outer sides so c-1-2 or 2-1-c
+    for (int i = 0; i < neighborsNum; i++)
+    {
+        AtomStruct neighborAtom1 = atoms[neighbors[neighborsStart+i]];
+        int neighborAtom1NeighborsStart = int(neighborAtom1.bondNeighborsStart);
+        int neighborAtom1NeighborsNum = int(neighborAtom1.bondNeighborsSize);
+        for (int j = 0; j < neighborAtom1NeighborsNum; j++)
+        {
+            // ignore if the neighbor is the current atom
+            int neighborAtom2Idx = int(neighbors[neighborAtom1NeighborsStart+j]);
+            if (curAtomIdx == neighborAtom2Idx) continue;
+
+            AtomStruct neighborAtom2 = atoms[neighborAtom2Idx];
+            if (useSimplifiedCalculation)
+            {
+                calcAngleSimple(curAtom, neighborAtom1, neighborAtom2, 1, 0, resultDir);
+            }
+            else
+            {
+                calcAngle(curAtom, neighborAtom1, neighborAtom2, 1, 0, 0, resultDir);
+            }
+        }
+    }
+
+    /*
+     * calc dihedral forces
+     */
+    // case: current atom is on one of the ends c-1-2-3 or 3-2-1-c
+    for (int i = 0; i < neighborsNum; i++)
+    {
+        int neighborAtom1Idx = int(neighbors[neighborsStart+i]);
+
+        AtomStruct neighborAtom1 = atoms[neighborAtom1Idx];
+        int neighborAtom1NeighborsStart = int(neighborAtom1.bondNeighborsStart);
+        int neighborAtom1NeighborsNum = int(neighborAtom1.bondNeighborsSize);
+        for (int j = 0; j < neighborAtom1NeighborsNum; j++)
+        {
+            // ignore if neighbor 2 is the current atom
+            int neighborAtom2Idx = int(neighbors[neighborAtom1NeighborsStart+j]);
+            if (curAtomIdx == neighborAtom2Idx) continue;
+
+            AtomStruct neighborAtom2 = atoms[neighborAtom2Idx];
+            int neighborAtom2NeighborsStart = int(neighborAtom2.bondNeighborsStart);
+            int neighborAtom2NeighborsNum = int(neighborAtom2.bondNeighborsSize);
+            for (int k = 0; k < neighborAtom2NeighborsNum; k++)
+            {
+                // ignore if neighbor 3 is neighbor 1 or the current atom
+                int neighborAtom3Idx = int(neighbors[neighborAtom2NeighborsStart+k]);
+                if (neighborAtom1Idx == neighborAtom3Idx || curAtomIdx == neighborAtom3Idx) continue;
+
+                AtomStruct neighborAtom3 = atoms[neighborAtom3Idx];
+                if (useSimplifiedCalculation)
+                {
+                    calcDihedralSimple(curAtom, neighborAtom1, neighborAtom2, neighborAtom3, 1, 0, resultDir);
+                }
+                else
+                {
+                    calcDihedral(curAtom, neighborAtom1, neighborAtom2, neighborAtom3, 1, 0, 0, 0, resultDir);
+                }
+            }
+        }
+    }
+    // case: atom is inside 1-2-c-3 or 3-c-2-1
+    for (int i = 0; i < neighborsNum; i++)
+    {
+        int neighborAtom2Idx = int(neighbors[neighborsStart+i]);
+        AtomStruct neighborAtom2 = atoms[neighborAtom2Idx];
+        int neighborAtom2NeighborsStart = int(neighborAtom2.bondNeighborsStart);
+        int neighborAtom2NeighborsNum 	= int(neighborAtom2.bondNeighborsSize);
+        for (int j = 0; j < neighborAtom2NeighborsNum; j++)
+        {
+            // ignore if neighbor 1 is the current atom
+            int neighborAtom1Idx = int(neighbors[neighborAtom2NeighborsStart+j]);
+            if (curAtomIdx == neighborAtom1Idx) continue;
+
+            AtomStruct neighborAtom1 = atoms[neighborAtom1Idx];
+
+            for(int k = 0; k < neighborsNum; k++)
+            {
+                // ignore if neighbor 3 is neighbor 1 or 2
+                int neighborAtom3Idx = int(neighbors[neighborsStart+k]);
+                if (i == k || neighborAtom3Idx == neighborAtom1Idx) continue;
+
+                AtomStruct neighborAtom3 = atoms[neighborAtom3Idx];
+                if (useSimplifiedCalculation)
+                {
+                    calcDihedralSimple(neighborAtom3, curAtom, neighborAtom2, neighborAtom1, 0, 1, resultDir);
+                }
+                else
+                {
+                    calcDihedral(neighborAtom1, neighborAtom2, curAtom, neighborAtom3, 0, 0, 1, 0, resultDir);
+                }
+            }
+        }
+    }
+
+    /*
+     * calc improper dihedral forces
+     */
+    // case: current atom is in the center
+    /*
+     *		  2   3
+     *		   \ /
+     *			c
+     *			|
+     *			1
+     */
+    if (neighborsNum > 2)
+    {
+        for (int i = 0; i < neighborsNum-2; i++)
+        {
+            AtomStruct neighborAtom1 = atoms[neighbors[neighborsStart+i]];
+            for (int j = i+1; j < neighborsNum-1; j++)
+            {
+                AtomStruct neighborAtom2 = atoms[neighbors[neighborsStart+j]];
+                for (int k = j+1; k < neighborsNum; k++)
+                {
+                    AtomStruct neighborAtom3 = atoms[neighbors[neighborsStart+k]];
+                    if (useSimplifiedCalculation)
+                    {
+                        calcImpropersSimple(neighborAtom1, neighborAtom2, neighborAtom3, curAtom, 0, 1, resultDir);
+                    }
+                    else
+                    {
+                        calcImpropers(neighborAtom1, neighborAtom2, neighborAtom3, curAtom, 0, 0, 0, 1, resultDir);
+                    }
+                }
+            }
+        }
+    }
+    // case: current atom is at one side
+    /*
+     *		  2   3
+     *		   \ /
+     *			1
+     *			|
+     *			c
+     */
+    for (int i = 0; i < neighborsNum; i++) {
+        int neighborAtom1Idx = int(neighbors[neighborsStart+i]);
+
+        AtomStruct neighborAtom1 = atoms[neighborAtom1Idx];
+        int neighborAtom1NeighborsStart = int(neighborAtom1.bondNeighborsStart);
+        int neighborAtom1NeighborsNum = int(neighborAtom1.bondNeighborsSize);
+
+        // at least 4 atoms including neighbor 1 have to be involved in the dihedral force
+        if (neighborAtom1NeighborsNum < 3) continue;
+
+        for(int j = 0; j < neighborAtom1NeighborsNum; j++)
+        {
+            // ignore if neighbor 2 is the current atom
+            int neighborAtom2Idx = int(neighbors[neighborAtom1NeighborsStart+j]);
+            if (neighborAtom2Idx == curAtomIdx) continue;
+
+            AtomStruct neighborAtom2 = atoms[neighborAtom2Idx];
+            for(int k = 0; k < neighborAtom1NeighborsNum; k++)
+            {
+                // ignore if neighbor 3 is neighbor 2 or the current atom
+                int neighborAtom3Idx = int(neighbors[neighborAtom1NeighborsStart+k]);
+                if (j == k || neighborAtom3Idx == curAtomIdx) continue;
+
+                AtomStruct neighborAtom3 = atoms[neighborAtom3Idx];
+                if (useSimplifiedCalculation)
+                {
+                    calcImpropersSimple(curAtom, neighborAtom2, neighborAtom3, neighborAtom1, 1, 0, resultDir);
+                }
+                else
+                {
+                    calcImpropers(curAtom, neighborAtom2, neighborAtom3, neighborAtom1, 1, 0, 0, 0, resultDir);
+                }
+            }
+        }
+    }
+
+
+    float alpha = 1.0;
+    /*
+     * find the closest neighboratom that belongs to a different protein/ligand.
+     * Calc the difference between the direction to that neighboratom and the result
+     * direction of the force calculation. If the vectors point in the same direction
+     * then set charge to green, if they point in opposite directions change the
+     * charge to red. For all other directions interpolate between green and red.
+     */
+    int closestAtomIdx = getClosestAtomIdx(curAtomIdx, curAtom.center, int(curAtom.proteinID));
+    if (closestAtomIdx < 0 || closestAtomIdx >= numAtoms)
+    {
+        atoms[curAtomIdx].charge = vec4(1.0, 1.0, 1.0, alpha);
+    }
+    else
+    {
+        vec3 dirToClosestAtom = atoms[closestAtomIdx].center - atoms[curAtomIdx].center;
+        float dotProduct = dot(resultDir, dirToClosestAtom);
+        float resultDirLength = length(resultDir);
+        float dirToClosestAtomLength = length(dirToClosestAtom);
+        float norm = resultDirLength * dirToClosestAtomLength;
+        float weight = acos(dotProduct/norm) / M_PI;
+
+
+        vec4 black  = vec4(0.0, 0.0, 0.0, alpha);
+        vec4 red    = vec4(1.0, 0.0, 0.0, alpha);
+        vec4 yellow = vec4(1.0, 1.0, 0.0, alpha);
+        vec4 cyan   = vec4(0.0, 1.0, 1.0, 1.0);
+        vec4 green  = vec4(0.0, 1.0, 0.0, alpha);
+        vec4 blue   = vec4(0.0, 0.0, 1.0, 1.0);
+        vec4 gray   = vec4(0.3, 0.3, 0.3, 1.0);
+        vec4 purple = vec4(1.0, 0.0, 1.0, 1.0);
+
+        if (isinf(dirToClosestAtomLength) || isnan(dirToClosestAtomLength))
+        {
+            atoms[curAtomIdx].charge = blue;
+        }
+        else if (isinf(resultDirLength) || isnan(resultDirLength))
+        {
+            atoms[curAtomIdx].charge = cyan;
+        }
+        else if (weight < 0.5)
+        {
+            atoms[curAtomIdx].charge = green;
+        }
+        else if (weight == 0.5)
+        {
+            atoms[curAtomIdx].charge = yellow;
+        }
+        else if (weight <= 1.0)
+        {
+            atoms[curAtomIdx].charge = red;
+        }
+        else
+        {
+            atoms[curAtomIdx].charge = purple;
+        }
+    }
+}
