@@ -5,7 +5,7 @@
 #version 430
 
 // Color of impostor
-out vec3 vertColor;
+out vec4 vertColor;
 out float vertRadius;
 
 // Struct for atom
@@ -55,5 +55,5 @@ void main()
     */
 
     //vertColor = normalize(atoms[index].charge.xyz) * 255;
-    vertColor = normalize(atoms[index].charge.xyz);
+    vertColor = vec4(normalize(atoms[index].charge.xyz), atoms[index].charge.w);
 }

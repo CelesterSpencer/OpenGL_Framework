@@ -15,11 +15,14 @@
 #include "ShaderTools/Renderer.h"
 #include "ShaderTools/ShaderProgram.h"
 #include "Utils/Logger.h"
+#include "NeighborSearch/NeighborhoodSearch.h"
+#include "NeighborSearch/GPUHandler.h"
 
 // local includes
 #include "ProteinLoader.h"
 #include "Utils/OrbitCamera.h"
 #include "AmberForceFieldParameterLoader.h"
+#include "Utils/PickingTexture.h"
 
 
 
@@ -48,10 +51,15 @@ std::unique_ptr<OrbitCamera>    mp_camera;
 glm::vec2                       m_CameraDeltaMovement;
 float                           m_CameraSmoothTime;
 bool                            m_rotateCamera = false;
+PickingTexture                  m_pickingTexture;
+ShaderProgram                   m_idPickingShader;
+GLuint                          m_translateAxesPointsVBO;
+GLuint                          m_translateAxesPointsVAO;
+ShaderProgram                   m_translateAxesShader;
 
 // protein
 ProteinLoader   m_proteinLoader;
-int             m_selectedAtom = -1;
+int             m_selectedAtom = 0;
 int             m_selectedProtein = 0;
 float           m_proteinMoveSpeed = 2.f;
 GLuint m_atomsSSBO;
@@ -60,6 +68,17 @@ GLuint m_valuesVectorSSBO;
 GLuint m_bondNeighborsSSBO;
 ShaderProgram m_calcChargeProgram;
 uint m_numberOfAtomSymbols;
+
+// neighborhood search
+ShaderProgram m_extractAtomPositionsShader;
+ShaderProgram m_drawSearchRadiusShader;
+NeighborhoodSearch m_search;
+GLuint m_positionsSSBO;
+GLuint m_searchResultsSSBO;
+float m_searchRadius = 20.f;
+
+// amber force calculation
+bool useSimplifiedCalculation = false;
 
 // rendering
 glm::vec3   m_lightDirection;
@@ -185,6 +204,41 @@ void mouseButtonCallback(int button, int action, int mods)
     {
         m_rotateCamera = false;
     }
+
+    if (button == GLFW_MOUSE_BUTTON_RIGHT && action == GLFW_PRESS)
+    {
+        // get the selected atom
+        int atomIdx = -1;
+        double cursorX, cursorY;
+        glfwGetCursorPos(mp_Window, &cursorX, &cursorY);
+        PickingTexture::PixelInfo pixel = m_pickingTexture.ReadPixel((uint)cursorX, HEIGHT - (uint)(cursorY) - 1);
+        if (pixel.ObjectID >= 1)
+        {
+            atomIdx = (int)pixel.ObjectID;
+        }
+        m_selectedAtom = atomIdx;
+
+        // get the corresponding protein
+        if (atomIdx >= 0)
+        {
+            int currentAtomsCount = 0;
+            int newProteinIdx = -1;
+            for (int i = 0; i < m_proteinLoader.getNumberOfProteins(); i++)
+            {
+                currentAtomsCount += m_proteinLoader.getProteinAt(i)->getNumberOfAtoms();
+                if (atomIdx < currentAtomsCount)
+                {
+                    newProteinIdx = i;
+                    break;
+                }
+            }
+
+            if (newProteinIdx >= 0)
+            {
+                m_selectedProtein = newProteinIdx;
+            }
+        }
+    }
 }
 
 void scrollCallback(double xoffset, double yoffset)
@@ -229,6 +283,12 @@ void run()
      * setup cursor position
      */
     float prevCursorX, prevCursorY = 0;
+
+
+    /*
+     * setup neighborhood
+     */
+    Neighborhood neighborhood;
 
 
 
@@ -292,17 +352,62 @@ void run()
         glUnmapBuffer(GL_SHADER_STORAGE_BUFFER);
 
         /*
+         * extract positions from atoms
+         */
+        int numBlocks = ceil((float)m_proteinLoader.getNumberOfAllAtoms() / BLOCK_SIZE);
+        glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 0, m_atomsSSBO);
+        glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 1, m_positionsSSBO);
+        m_extractAtomPositionsShader.use();
+        m_extractAtomPositionsShader.update("pnum",m_proteinLoader.getNumberOfAllAtoms());
+        glDispatchCompute(numBlocks,1,1);
+        glMemoryBarrier(GL_ALL_BARRIER_BITS);
+        glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 0, 0);
+        glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 1, 0);
+
+        /*
+         * find neighborhood
+         */
+        m_search.run(&m_positionsSSBO, neighborhood);
+
+
+
+        /*
+         * bind relevant buffers
+         */
+        glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 0, m_atomsSSBO);
+        glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 1, m_indexCubeSSBO);
+        glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 2, m_valuesVectorSSBO);
+        glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 3, m_bondNeighborsSSBO);
+
+        glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 4, *neighborhood.dp_particleCell);
+        glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 5, *neighborhood.dp_particleCellIndex);
+        glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 6, *neighborhood.dp_gridCellCounts);
+        glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 7, *neighborhood.dp_gridCellOffsets);
+        glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 8, *neighborhood.dp_grid);
+        glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 9, *neighborhood.dp_particleOriginalIndex);
+
+
+        /*
          * update charge
          */
         m_calcChargeProgram.use();
         m_calcChargeProgram.update("numAtoms", m_proteinLoader.getNumberOfAllAtoms());
-        //m_calcChargeProgram.update("numAtomSymbols", (int)m_numberOfAtomSymbols);
+        m_calcChargeProgram.update("numAtomSymbols", (int)m_numberOfAtomSymbols);
+        m_calcChargeProgram.update("searchRadius2", m_searchRadius*m_searchRadius);
+        m_calcChargeProgram.update("gridAdjCnt", neighborhood.numberOfSearchCells);
+        m_calcChargeProgram.update("searchCellOff", neighborhood.startCellOffset);
+        m_calcChargeProgram.update("useSimplifiedCalculation", useSimplifiedCalculation);
         glDispatchCompute(ceil(m_proteinLoader.getNumberOfAllAtoms()/256.0), 1, 1);
+        glUniform1iv(glGetUniformLocation(m_calcChargeProgram.getProgramHandle(),"gridAdj"), 216, neighborhood.p_searchCellOffsets);
         glMemoryBarrier (GL_ALL_BARRIER_BITS);
 
         /*
          * draw proteins as impostor
          */
+        //glEnable(GL_BLEND);
+        //glDepthMask(GL_FALSE);
+        //glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+
         glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 0, m_atomsSSBO);
         m_impostorProgram.use();
         m_impostorProgram.update("view", mp_camera->getViewMatrix());
@@ -312,6 +417,100 @@ void run()
         m_impostorProgram.update("lightDir", m_lightDirection);
         //m_impostorProgram.update("proteinNum", (int)m_proteinLoader.getNumberOfProteins());
         glDrawArrays(GL_POINTS, 0, (GLsizei)m_proteinLoader.getNumberOfAllAtoms());
+
+        //glDisable(GL_BLEND);
+        //glDepthMask(GL_TRUE);
+
+        /*
+         * fill id picking texture with atom ids
+         */
+        m_pickingTexture.EnableWriting();
+        glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
+        m_idPickingShader.use();
+        m_idPickingShader.update("view", mp_camera->getViewMatrix());
+        m_idPickingShader.update("projection", mp_camera->getProjectionMatrix());
+        m_idPickingShader.update("probeRadius", 0.0);
+        glDrawArrays(GL_POINTS, 0, (GLsizei)m_proteinLoader.getNumberOfAllAtoms());
+        m_pickingTexture.DisableWriting();
+
+        /*
+         * unbind buffers
+         */
+        glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 0, 0);
+        glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 1, 0);
+        glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 2, 0);
+        glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 3, 0);
+        glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 4, 0);
+        glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 5, 0);
+        glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 6, 0);
+        glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 7, 0);
+        glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 8, 0);
+        glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 9, 0);
+
+        /*
+         * draw gizmo for selected protein
+         */
+        if (m_selectedProtein >= 0)
+        {
+            std::vector<glm::vec4> points;
+            float axisSize = 10.0;
+            glm::vec4 proteinCenter = glm::vec4(m_proteinLoader.getProteinAt(m_selectedProtein)->getCenterOfGravity(), 1);
+            points.push_back(proteinCenter);
+            points.push_back(proteinCenter + glm::vec4(axisSize, 0.0, 0.0, 0.0));
+            points.push_back(proteinCenter);
+            points.push_back(proteinCenter + glm::vec4(0.0, axisSize, 0.0, 0.0));
+            points.push_back(proteinCenter);
+            points.push_back(proteinCenter + glm::vec4(0.0, 0.0, axisSize, 0.0));
+
+            int numVBOEntries = points.size();
+
+            // update points vbo
+            if (m_translateAxesPointsVBO != 0) glDeleteBuffers(1, &m_translateAxesPointsVBO);
+            m_translateAxesPointsVBO = 0;
+            glGenBuffers(1, &m_translateAxesPointsVBO);
+            glBindBuffer(GL_ARRAY_BUFFER, m_translateAxesPointsVBO);
+            glBufferData(GL_ARRAY_BUFFER, points.size() * 4 * sizeof(float), points.data(), GL_STATIC_DRAW);
+
+            if (m_translateAxesPointsVAO != 0) glDeleteVertexArrays(1, &m_translateAxesPointsVAO);
+            m_translateAxesPointsVAO = 0;
+            glGenVertexArrays(1, &m_translateAxesPointsVAO);
+            glBindVertexArray(m_translateAxesPointsVAO);
+            glVertexAttribPointer(0, 4, GL_FLOAT, GL_FALSE, 0, 0);
+
+            // disable the vbo
+            glEnableVertexAttribArray(0);
+
+            // draw the axes
+            glDisable(GL_DEPTH_TEST);
+            m_translateAxesShader.use();
+            m_translateAxesShader.update("viewMat", mp_camera->getViewMatrix());
+            m_translateAxesShader.update("projMat", mp_camera->getProjectionMatrix());
+            glDrawArrays(GL_LINES, 0, numVBOEntries);
+            glEnable(GL_DEPTH_TEST);
+
+            // disable the vao
+            glBindVertexArray(0);
+        }
+
+        /*
+         * draw radius around selected atom
+         */
+        if (m_selectedAtom >= 0)
+        {
+            glEnable(GL_BLEND);
+            glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+
+            m_drawSearchRadiusShader.use();
+            SimpleAtom selectedAtom = m_proteinLoader.getAllAtoms().at(m_selectedAtom);
+            m_drawSearchRadiusShader.update("selectedAtomPosition", selectedAtom.pos);
+            m_drawSearchRadiusShader.update("searchRadius", m_searchRadius);
+            m_drawSearchRadiusShader.update("view", mp_camera->getViewMatrix());
+            m_drawSearchRadiusShader.update("projection", mp_camera->getProjectionMatrix());
+            glDrawArrays(GL_POINTS, 0, 1);
+            glBindVertexArray(0);
+
+            glDisable(GL_BLEND);
+        }
 
         /*
          * update gui
@@ -377,6 +576,22 @@ void updateGUI()
             ImGui::EndMenu();
         }
 
+        /*
+         * Amber force field
+         */
+        if (ImGui::BeginMenu("AmberForcefield"))
+        {
+            std::string useSimplifiedCalculationText = "Use simplified force calculation";
+            ImGui::Checkbox(useSimplifiedCalculationText.c_str(), &useSimplifiedCalculation);
+
+            std::string selectedAtomText = "Selected atom: " + std::to_string(m_selectedAtom);
+            std::string selectedProteinText = "Selected protein: " + std::to_string(m_selectedProtein);
+            ImGui::Text(selectedAtomText.c_str());
+            ImGui::Text(selectedProteinText.c_str());
+
+            ImGui::EndMenu();
+        }
+
 
 
         /*
@@ -415,15 +630,19 @@ int main()
     m_numberOfAtomSymbols = amberForceFieldParameter.getNumberOfAtomSymbols();
 
     /*
-     * general setup
+     * setup OpenGL
      */
     setup();
 
     /*
      * compile shader programs
      */
-    m_impostorProgram     = ShaderProgram("/AmberForceFieldVisualization/impostor.vert", "/AmberForceFieldVisualization/impostor.geom", "/AmberForceFieldVisualization/impostor.frag");
-    m_calcChargeProgram   = ShaderProgram("/AmberForceFieldVisualization/amberff.comp");
+    m_impostorProgram            = ShaderProgram("/AmberForceFieldVisualization/impostor.vert", "/AmberForceFieldVisualization/impostor.geom", "/AmberForceFieldVisualization/impostor.frag");
+    m_calcChargeProgram          = ShaderProgram("/AmberForceFieldVisualization/amberff.comp");
+    m_extractAtomPositionsShader = ShaderProgram("/AmberForceFieldVisualization/extractAtomPositions.comp");
+    m_drawSearchRadiusShader     = ShaderProgram("/NeighborSearch/renderSearchRadius/radius.vert", "/NeighborSearch/renderSearchRadius/radius.geom", "/NeighborSearch/renderSearchRadius/radius.frag");
+    m_idPickingShader            = ShaderProgram("/AmberForceFieldVisualization/pickingTexture/impostor.vert", "/AmberForceFieldVisualization/pickingTexture/impostor.geom", "/AmberForceFieldVisualization/pickingTexture/impostor.frag");
+    m_translateAxesShader        = ShaderProgram("/AmberForceFieldVisualization/gizmo/translate.vert", "/AmberForceFieldVisualization/gizmo/translate.frag");
     GLenum err = glGetError();
     if (err != GL_NO_ERROR) {
         //Logger::instance().print("GLerror after init shader programs: " + std::to_string(err), Logger::Mode::ERROR);
@@ -436,7 +655,16 @@ int main()
     SimpleProtein* proteinB = m_proteinLoader.loadProtein("PDB/5bs0.pdb", amberForceFieldParameter.getAtomSymbolsMap());
     proteinA->center();
     proteinB->center();
-    proteinB->move(glm::vec3(proteinA->extent().x/2 + proteinB->extent().x/2, 0, 0));
+    proteinB->move(glm::vec3(proteinA->extent().x/2 + proteinB->extent().x/4, 0, 0));
+
+    /*
+     * setup neighborhood search
+     */
+    glm::fvec3 min, max;
+    glm::vec3 gridResolution = glm::vec3(10,10,10);
+    float searchRadius = 10.;
+    m_proteinLoader.getCenteredBoundingBoxAroundProteins(min, max);
+    m_search.init(m_proteinLoader.getNumberOfAllAtoms(),min,max,gridResolution,searchRadius);
 
     /*
      * setup buffers
@@ -465,6 +693,14 @@ int main()
     glBufferData(GL_SHADER_STORAGE_BUFFER, sizeof(uint) * m_proteinLoader.getAllNeighbors().size(), m_proteinLoader.getAllNeighbors().data(), GL_STATIC_DRAW);
     glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 3, m_bondNeighborsSSBO);
     glBindBuffer(GL_SHADER_STORAGE_BUFFER, 0);
+
+    GPUHandler::initSSBO<glm::vec4>(&m_positionsSSBO, m_proteinLoader.getNumberOfAllAtoms());
+    GPUHandler::initSSBO<int>(&m_searchResultsSSBO, m_proteinLoader.getNumberOfAllAtoms());
+
+    /*
+     * setup id picking texture
+     */
+    m_pickingTexture.Init(WIDTH, HEIGHT);
 
     /*
      * run application

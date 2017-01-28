@@ -40,6 +40,11 @@ public:
         this->name = name;
     }
 
+    int getNumberOfAtoms()
+    {
+        return atoms.size();
+    }
+
     void move(glm::vec3 offset)
     {
         for (int i = 0; i < atoms.size(); i++) {

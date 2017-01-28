@@ -7,7 +7,7 @@
 in vec2 uv;
 flat in float radius;
 flat in vec3 position;
-flat in vec3 color;
+flat in vec4 color;
 
 out vec4 outColor;
 layout (depth_less) out float gl_FragDepth; // Makes optimizations possible
@@ -70,8 +70,8 @@ void main()
 
     // Some "ambient" lighting combined with specular
     vec3 ambientColor = vec3(0.5, 0.5, 0.5);
-    vec3 finalColor = mix(color * mix(ambientColor, vec3(1.0, 1.0, 1.0), lighting), vec3(1,1,1), specular);
+    vec3 finalColor = mix(color.xyz * mix(ambientColor, vec3(1.0, 1.0, 1.0), lighting), vec3(1,1,1), specular);
 
     // Output color
-    outColor = vec4(finalColor, 1);
+    outColor = vec4(finalColor, color.w);
 }

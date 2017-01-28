@@ -16,7 +16,7 @@
 #include "AssertData.h"
 #include "Utils/Logger.h"
 #include "NeighborhoodSearchDefines.h"
-#include "../../executables/NeighborSearchTest/SimpleProtein.h"
+//#include "../../executables/NeighborSearchTest/SimpleProtein.h"
 
 
 class NeighborhoodSearch {
