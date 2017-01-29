@@ -224,17 +224,21 @@ void calcDihedralSimple(
     vec3 v3 = a4.center - a3.center;
 
     // calculate normals of both planes
-    vec3 n1 = normalize(cross(v1,v2a));
-    vec3 n2 = normalize(cross(v3,v2b));
+    vec3 n1 = cross(v1,v2a);
+    vec3 n2 = cross(v3,v2b);
+
+    float lenN1 = max(length(n1), EPSILON);
+    float lenN2 = max(length(n2), EPSILON);
 
     // calculate dihedral angle between two planes
-    float phi = acos(- dot(n1, n2)); // phi = acos( -n1*n2 / (|n1|*|n2|) ), |n1|*|n2|=1
+    float phi = acos(- dot(n1, n2) / (lenN1*lenN2)); // phi = acos( -n1*n2 / (|n1|*|n2|) ), |n1|*|n2|=1
 
     // calculate the rotation angle
     float delta = (theta - phi) / 2.0;
 
     // calculate the rotation axis
-    vec3 rotationAxis = normalize(cross(v3,v1));
+    vec3 rotationAxis = cross(v3,v1);
+    rotationAxis = rotationAxis / max(length(rotationAxis), EPSILON);
 
     // rotate the vector to its equilibrium angle
     vec3 vecRot = rotateVector(v1, rotationAxis, delta);
@@ -315,17 +319,25 @@ void calcImpropersSimple(
     vec3 v4 = a1.center - a2.center;
 
     // calculate normals of both planes
-    vec3 n1 = normalize(cross(v1,v2));
-    vec3 n2 = normalize(cross(v3,v4));
+    vec3 n1 = cross(v1,v2);
+    vec3 n2 = cross(v3,v4);
+
+    float lenN1 = max(length(n1), EPSILON);
+    float lenN2 = max(length(n2), EPSILON);
 
     // calculate dihedral angle between two planes
-    float phi = acos(- dot(n1, n2)); // phi = acos( -n1*n2 / (|n1|*|n2|) ), |n1|*|n2|=1
+    float phi = acos(- dot(n1, n2) / (lenN1*lenN2)); // phi = acos( -n1*n2 / (|n1|*|n2|) ), |n1|*|n2|=1
+    if (isnan(phi) || isinf(phi))
+    {
+        phi = 0.0;
+    }
 
     // calculate the rotation angle
     float delta = (theta - phi) / 2.0;
 
     // calculate the rotation axis
-    vec3 rotationAxis = normalize(cross(-v1,v4));
+    vec3 rotationAxis = cross(-v1,v4);
+    rotationAxis = rotationAxis / max(length(rotationAxis), EPSILON);
 
     // rotate the vector to its equilibrium angle
     vec3 vecRot = rotateVector(v4, rotationAxis, delta);

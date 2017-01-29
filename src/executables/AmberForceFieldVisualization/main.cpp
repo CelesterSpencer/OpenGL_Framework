@@ -53,9 +53,6 @@ float                           m_CameraSmoothTime;
 bool                            m_rotateCamera = false;
 PickingTexture                  m_pickingTexture;
 ShaderProgram                   m_idPickingShader;
-GLuint                          m_translateAxesPointsVBO;
-GLuint                          m_translateAxesPointsVAO;
-ShaderProgram                   m_translateAxesShader;
 
 // protein
 ProteinLoader   m_proteinLoader;
@@ -404,9 +401,11 @@ void run()
         /*
          * draw proteins as impostor
          */
-        //glEnable(GL_BLEND);
-        //glDepthMask(GL_FALSE);
-        //glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+        /*
+        glEnable(GL_BLEND);
+        glDepthMask(GL_FALSE);
+        glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+        */
 
         glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 0, m_atomsSSBO);
         m_impostorProgram.use();
@@ -418,8 +417,10 @@ void run()
         //m_impostorProgram.update("proteinNum", (int)m_proteinLoader.getNumberOfProteins());
         glDrawArrays(GL_POINTS, 0, (GLsizei)m_proteinLoader.getNumberOfAllAtoms());
 
-        //glDisable(GL_BLEND);
-        //glDepthMask(GL_TRUE);
+        /*
+        glDisable(GL_BLEND);
+        glDepthMask(GL_TRUE);
+        */
 
         /*
          * fill id picking texture with atom ids
@@ -446,51 +447,6 @@ void run()
         glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 7, 0);
         glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 8, 0);
         glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 9, 0);
-
-        /*
-         * draw gizmo for selected protein
-         */
-        if (m_selectedProtein >= 0)
-        {
-            std::vector<glm::vec4> points;
-            float axisSize = 10.0;
-            glm::vec4 proteinCenter = glm::vec4(m_proteinLoader.getProteinAt(m_selectedProtein)->getCenterOfGravity(), 1);
-            points.push_back(proteinCenter);
-            points.push_back(proteinCenter + glm::vec4(axisSize, 0.0, 0.0, 0.0));
-            points.push_back(proteinCenter);
-            points.push_back(proteinCenter + glm::vec4(0.0, axisSize, 0.0, 0.0));
-            points.push_back(proteinCenter);
-            points.push_back(proteinCenter + glm::vec4(0.0, 0.0, axisSize, 0.0));
-
-            int numVBOEntries = points.size();
-
-            // update points vbo
-            if (m_translateAxesPointsVBO != 0) glDeleteBuffers(1, &m_translateAxesPointsVBO);
-            m_translateAxesPointsVBO = 0;
-            glGenBuffers(1, &m_translateAxesPointsVBO);
-            glBindBuffer(GL_ARRAY_BUFFER, m_translateAxesPointsVBO);
-            glBufferData(GL_ARRAY_BUFFER, points.size() * 4 * sizeof(float), points.data(), GL_STATIC_DRAW);
-
-            if (m_translateAxesPointsVAO != 0) glDeleteVertexArrays(1, &m_translateAxesPointsVAO);
-            m_translateAxesPointsVAO = 0;
-            glGenVertexArrays(1, &m_translateAxesPointsVAO);
-            glBindVertexArray(m_translateAxesPointsVAO);
-            glVertexAttribPointer(0, 4, GL_FLOAT, GL_FALSE, 0, 0);
-
-            // disable the vbo
-            glEnableVertexAttribArray(0);
-
-            // draw the axes
-            glDisable(GL_DEPTH_TEST);
-            m_translateAxesShader.use();
-            m_translateAxesShader.update("viewMat", mp_camera->getViewMatrix());
-            m_translateAxesShader.update("projMat", mp_camera->getProjectionMatrix());
-            glDrawArrays(GL_LINES, 0, numVBOEntries);
-            glEnable(GL_DEPTH_TEST);
-
-            // disable the vao
-            glBindVertexArray(0);
-        }
 
         /*
          * draw radius around selected atom
@@ -642,7 +598,6 @@ int main()
     m_extractAtomPositionsShader = ShaderProgram("/AmberForceFieldVisualization/extractAtomPositions.comp");
     m_drawSearchRadiusShader     = ShaderProgram("/NeighborSearch/renderSearchRadius/radius.vert", "/NeighborSearch/renderSearchRadius/radius.geom", "/NeighborSearch/renderSearchRadius/radius.frag");
     m_idPickingShader            = ShaderProgram("/AmberForceFieldVisualization/pickingTexture/impostor.vert", "/AmberForceFieldVisualization/pickingTexture/impostor.geom", "/AmberForceFieldVisualization/pickingTexture/impostor.frag");
-    m_translateAxesShader        = ShaderProgram("/AmberForceFieldVisualization/gizmo/translate.vert", "/AmberForceFieldVisualization/gizmo/translate.frag");
     GLenum err = glGetError();
     if (err != GL_NO_ERROR) {
         //Logger::instance().print("GLerror after init shader programs: " + std::to_string(err), Logger::Mode::ERROR);
