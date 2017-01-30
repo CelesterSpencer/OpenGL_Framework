@@ -53,6 +53,16 @@ float                           m_CameraSmoothTime;
 bool                            m_rotateCamera = false;
 PickingTexture                  m_pickingTexture;
 ShaderProgram                   m_idPickingShader;
+int                             m_interactionMode = 0;
+glm::vec3                       m_centerOfGravityCameraSpace;
+glm::vec3                       m_reprojectedMousePositionCameraSpace;
+bool                            m_resetStartMousePosition = true;
+glm::vec2                       m_startMousePosition;
+glm::vec2                       m_currentMousePosition;
+float                           m_translationDelta = 0.0;
+float                           m_rotationAngle = 0.0;
+ShaderProgram                   m_linesShader;
+glm::mat4                       m_tempRotationMatrix;
 
 // protein
 ProteinLoader   m_proteinLoader;
@@ -65,6 +75,8 @@ GLuint m_valuesVectorSSBO;
 GLuint m_bondNeighborsSSBO;
 ShaderProgram m_calcChargeProgram;
 uint m_numberOfAtomSymbols;
+std::vector<glm::mat4> m_modelMatrices;
+GLuint m_modelMatricesBuffer;
 
 // neighborhood search
 ShaderProgram m_extractAtomPositionsShader;
@@ -98,6 +110,7 @@ void compileShaderPrograms();
 void keyCallback(int key, int scancode, int action, int mods);
 void mouseButtonCallback(int button, int action, int mods);
 void scrollCallback(double xoffset, double yoffset);
+void mousePositionCallback(double xpos, double ypos);
 
 void run();
 
@@ -134,6 +147,7 @@ void setup()
     /*
      * register callbacks
      */
+    // key press callback
     std::function<void(int, int, int, int)> kC = [&](int k, int s, int a, int m)
     {
         // Check whether ImGui is handling this
@@ -146,6 +160,7 @@ void setup()
     };
     setKeyCallback(mp_Window, kC);
 
+    // mouse button callback
     std::function<void(int, int, int)> kB = [&](int b, int a, int m)
     {
         // Check whether ImGui is handling this
@@ -158,6 +173,7 @@ void setup()
     };
     setMouseButtonCallback(mp_Window, kB);
 
+    // mouse scroll callback
     std::function<void(double, double)> kS = [&](double x, double y)
     {
         // Check whether ImGui is handling this
@@ -169,6 +185,19 @@ void setup()
         scrollCallback(x,y);
     };
     setScrollCallback(mp_Window, kS);
+
+    // cursor position callback
+    std::function<void(double, double)> kM = [&](double x, double y)
+    {
+        // Check whether ImGui is handling this
+        ImGuiIO& io = ImGui::GetIO();
+        if(io.WantCaptureMouse)
+        {
+            return;
+        }
+        mousePositionCallback(x,y);
+    };
+    setCursorPosCallback(mp_Window, kM);
 
     /*
      * init opengl
@@ -188,13 +217,29 @@ void setup()
  */
 void keyCallback(int key, int scancode, int action, int mods)
 {
+    if (key == GLFW_KEY_ESCAPE && action == GLFW_PRESS)
+    {
+        glfwSetWindowShouldClose(mp_Window, GL_TRUE);
+    }
 
+    if (key == GLFW_KEY_T && action == GLFW_PRESS)
+    {
+        m_resetStartMousePosition = true;
+        m_interactionMode = 1; // set interaction mode to TRANSLATE
+    }
+
+    if (key == GLFW_KEY_R && action == GLFW_PRESS)
+    {
+        m_resetStartMousePosition = true;
+        m_interactionMode = 2; // set interaction mode to ROTATE
+    }
 }
 
 void mouseButtonCallback(int button, int action, int mods)
 {
     if (button == GLFW_MOUSE_BUTTON_LEFT && action == GLFW_PRESS)
     {
+        m_interactionMode = 0; // set interaction mode to NORMAL
         m_rotateCamera = true;
     }
     else if (button == GLFW_MOUSE_BUTTON_LEFT && action == GLFW_RELEASE)
@@ -243,6 +288,17 @@ void scrollCallback(double xoffset, double yoffset)
     mp_camera->setRadius(mp_camera->getRadius() - 2.f * (float)yoffset);
 }
 
+void mousePositionCallback(double xpos, double ypos)
+{
+    //std::cout << "Mouse at " << std::to_string(xpos) << ", " << std::to_string(ypos) << std::endl;
+    if (m_resetStartMousePosition)
+    {
+        m_resetStartMousePosition = false;
+        m_startMousePosition = glm::vec2(xpos, HEIGHT - ypos);
+    }
+
+    m_currentMousePosition = glm::vec2(xpos, HEIGHT - ypos);
+}
 
 
 /*
@@ -341,6 +397,14 @@ void run()
         m_lightDirection = glm::normalize(glm::vec3(0, -1, 0));
 
         /*
+         * update model matrices
+         */
+        glBindBuffer(GL_SHADER_STORAGE_BUFFER, m_modelMatricesBuffer);
+        GLvoid* p_modelMatrices = glMapBuffer(GL_SHADER_STORAGE_BUFFER, GL_WRITE_ONLY);
+        memcpy(p_modelMatrices, m_modelMatrices.data(), sizeof(glm::mat4)*m_proteinLoader.getNumberOfProteins());
+        glUnmapBuffer(GL_SHADER_STORAGE_BUFFER);
+
+        /*
          * update atom positions
          */
         glBindBuffer(GL_SHADER_STORAGE_BUFFER, m_atomsSSBO);
@@ -382,6 +446,8 @@ void run()
         glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 7, *neighborhood.dp_gridCellOffsets);
         glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 8, *neighborhood.dp_grid);
         glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 9, *neighborhood.dp_particleOriginalIndex);
+
+        glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 10, m_modelMatricesBuffer);
 
 
         /*
@@ -447,6 +513,7 @@ void run()
         glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 7, 0);
         glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 8, 0);
         glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 9, 0);
+        glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 10, 0);
 
         /*
          * draw radius around selected atom
@@ -467,6 +534,105 @@ void run()
 
             glDisable(GL_BLEND);
         }
+
+        /*
+         * draw line from protein center of gravity to unprojected mouse position
+         */
+        // only do something when a valid protein is selected
+        if (m_selectedProtein >= 0 && m_selectedProtein < m_proteinLoader.getNumberOfProteins())
+        {
+            /*
+             * get the center of gravity for the selected protein in camera space
+             */
+            SimpleProtein* selectedProtein = m_proteinLoader.getProteinAt(m_selectedProtein);
+            glm::vec3 proteinCenterOfGravity = selectedProtein->getCenterOfGravity();
+            glm::vec4 proteinCenterOfGravityCameraSpace = mp_camera->getViewMatrix() * glm::vec4(proteinCenterOfGravity, 1.0);
+
+            /*
+             * unproject the cursor position into camera space
+             */
+            glm::vec4 viewport = glm::vec4(0.0, 0.0, WIDTH, HEIGHT);
+
+            // current cursor position
+            glm::vec3 pos3DCurrentCursor = mp_camera->getPositionAtPixel((int)m_currentMousePosition.x, (int)m_currentMousePosition.y);
+            glm::vec3 cursorPosition = glm::vec3(m_currentMousePosition, 0.1);
+            glm::vec3 unprojectedCursorPosition = glm::unProject(cursorPosition, mp_camera->getViewMatrix(), mp_camera->getProjectionMatrix(), viewport);
+            glm::vec4 unprojectedCursorPositionCameraSpace = mp_camera->getViewMatrix() * glm::vec4(unprojectedCursorPosition, 1.0);
+            // start cursor position
+            glm::vec3 pos3DStartCursor = mp_camera->getPositionAtPixel((int)m_startMousePosition.x, (int)m_startMousePosition.y);
+            glm::vec3 cursorStartPosition = glm::vec3(m_startMousePosition, 0.1);
+            glm::vec3 unprojectedCursorStartPosition = glm::unProject(cursorStartPosition, mp_camera->getViewMatrix(), mp_camera->getProjectionMatrix(), viewport);
+            glm::vec4 unprojectedCursorStartPositionCameraSpace = mp_camera->getViewMatrix() * glm::vec4(unprojectedCursorStartPosition, 1.0);
+
+            /*
+             * upload points to gpu
+             */
+            std::vector<glm::vec4> points;
+            points.push_back(proteinCenterOfGravityCameraSpace);
+            points.push_back(unprojectedCursorStartPositionCameraSpace);
+            points.push_back(proteinCenterOfGravityCameraSpace);
+            points.push_back(unprojectedCursorPositionCameraSpace);
+            GLuint pointsVBO = 0;
+            glGenBuffers(1, &pointsVBO);
+            glBindBuffer(GL_ARRAY_BUFFER, pointsVBO);
+            glBufferData(GL_ARRAY_BUFFER, points.size()*4*sizeof(float), points.data(), GL_STATIC_DRAW);
+            GLuint pointsVAO = 0;
+            glGenVertexArrays(1, &pointsVAO);
+            glBindVertexArray(pointsVAO);
+            glVertexAttribPointer(0, 4, GL_FLOAT, GL_FALSE, 0, 0);
+            // disable vbo
+            glEnableVertexAttribArray(0);
+
+            /*
+             * draw a line between the center of gravity and the unprojected mouse position
+             */
+            glEnable(GL_BLEND);
+            glDisable(GL_DEPTH_TEST);
+            glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+            glLineWidth(5.0);
+            m_linesShader.use();
+            m_linesShader.update("projMat", mp_camera->getProjectionMatrix());
+            glDrawArrays(GL_LINES, 0, points.size());
+            glLineWidth(1.0);
+            glEnable(GL_DEPTH_TEST);
+            glDisable(GL_BLEND);
+
+            // delete buffers
+            glBindVertexArray(0);
+            glDeleteBuffers(1, &pointsVBO);
+            glDeleteVertexArrays(1, &pointsVAO);
+
+            /*
+             * handle the interaction
+             */
+            switch (m_interactionMode)
+            {
+                case 1: // TRANSLATION
+
+                    break;
+                case 2: // ROTATION
+                    //glm::vec3 rotationAxis = glm::normalize(glm::vec3(proteinCenterOfGravityCameraSpace));
+                    glm::vec4 proteinCenterOfGravityProjected   = mp_camera->getProjectionMatrix() * proteinCenterOfGravityCameraSpace;
+                    glm::vec2 proteinCenterOfGravity2D;
+                    proteinCenterOfGravity2D.x = round(((proteinCenterOfGravityProjected.x/proteinCenterOfGravityProjected.w+1) /2.0) * WIDTH);
+                    proteinCenterOfGravity2D.y = HEIGHT - round(((proteinCenterOfGravityProjected.y/proteinCenterOfGravityProjected.w+1) /2.0) * HEIGHT);
+
+                    std::cout << "g: " << glm::to_string(proteinCenterOfGravity2D) << std::endl;
+
+                    glm::vec2 v1 = m_startMousePosition - proteinCenterOfGravity2D;
+                    v1 = glm::normalize(v1);
+                    glm::vec2 v2 = m_currentMousePosition - proteinCenterOfGravity2D;
+                    v2 = glm::normalize(v2);
+
+                    float angle = glm::orientedAngle(v1, v2) * 180 / M_PI;
+                    std::cout << "Oriented angle: " << std::to_string(angle) << std::endl;
+
+                    m_tempRotationMatrix = glm::rotate(angle, mp_camera->getCenter() - mp_camera->getPosition());
+                    m_modelMatrices.at(m_selectedProtein) = m_tempRotationMatrix;
+                    break;
+            }
+        }
+
 
         /*
          * update gui
@@ -598,6 +764,7 @@ int main()
     m_extractAtomPositionsShader = ShaderProgram("/AmberForceFieldVisualization/extractAtomPositions.comp");
     m_drawSearchRadiusShader     = ShaderProgram("/NeighborSearch/renderSearchRadius/radius.vert", "/NeighborSearch/renderSearchRadius/radius.geom", "/NeighborSearch/renderSearchRadius/radius.frag");
     m_idPickingShader            = ShaderProgram("/AmberForceFieldVisualization/pickingTexture/impostor.vert", "/AmberForceFieldVisualization/pickingTexture/impostor.geom", "/AmberForceFieldVisualization/pickingTexture/impostor.frag");
+    m_linesShader                = ShaderProgram("/AmberForceFieldVisualization/renderLinesCameraSpace/lines.vert", "/AmberForceFieldVisualization/renderLinesCameraSpace/lines.frag");
     GLenum err = glGetError();
     if (err != GL_NO_ERROR) {
         //Logger::instance().print("GLerror after init shader programs: " + std::to_string(err), Logger::Mode::ERROR);
@@ -651,11 +818,21 @@ int main()
 
     GPUHandler::initSSBO<glm::vec4>(&m_positionsSSBO, m_proteinLoader.getNumberOfAllAtoms());
     GPUHandler::initSSBO<int>(&m_searchResultsSSBO, m_proteinLoader.getNumberOfAllAtoms());
+    GPUHandler::initSSBO<glm::mat4>(&m_modelMatricesBuffer, m_proteinLoader.getNumberOfProteins());
 
     /*
      * setup id picking texture
      */
     m_pickingTexture.Init(WIDTH, HEIGHT);
+
+    /*
+     * setup temp rotation matrix and model matrices
+     */
+    m_tempRotationMatrix = glm::mat4();
+    for (int i = 0; i < m_proteinLoader.getNumberOfProteins(); i++)
+    {
+        m_modelMatrices.push_back(glm::mat4());
+    }
 
     /*
      * run application

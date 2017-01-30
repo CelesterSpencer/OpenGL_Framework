@@ -22,6 +22,7 @@ struct AtomStruct
 
 // SSBOs
 layout(std430, binding = 0) restrict readonly buffer AtomBuffer { AtomStruct atoms[]; };
+layout(std430, binding = 10) restrict readonly buffer ModelMatrixBuffer { mat4 modelMatrix[]; };
 
 // Uniforms
 uniform vec3 cameraWorldPos;
@@ -35,25 +36,12 @@ void main()
      * get atom center for every vertex id
      */
     int index = int(gl_VertexID);
-    gl_Position = vec4(atoms[index].center, 1);
+    AtomStruct atom = atoms[index];
+    gl_Position = modelMatrix[int(atom.proteinID)] * vec4(atom.center, 1);
 
     /*
-     * get the radius for the corresponding atom
+     * get the radius and charge for the corresponding atom
      */
     vertRadius = atoms[index].radius + probeRadius;
-
-    /*
-     * color selected atom different to all atoms
-
-    float proteinIdx = atoms[index].proteinID;
-    float PI = 3.1415926;
-    float colorF = PI*(float(proteinIdx)/proteinNum);
-    float sinC = sin(colorF);
-    float cosC = cos(colorF);
-    vec3 proteinColor = vec3(sinC, cosC, min(1,sinC+cosC));
-    vertColor = proteinColor;
-    */
-
-    //vertColor = normalize(atoms[index].charge.xyz) * 255;
     vertColor = vec4(normalize(atoms[index].charge.xyz), atoms[index].charge.w);
 }
