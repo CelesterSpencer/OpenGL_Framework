@@ -31,6 +31,8 @@ layout(std430, binding = 7) buffer GridoffsetBuffer      { int  gridoff[];   };
 layout(std430, binding = 8) buffer GridBuffer            { uint grid[];      };
 layout(std430, binding = 9) buffer UnsortedIndexBuffer   { uint undx[];      };
 
+layout(std430, binding = 10) restrict readonly buffer ModelMatrixBuffer { mat4 modelMatrix[]; };
+
 uniform int numAtoms;
 uniform int numAtomSymbols;
 uniform float searchRadius2; // radius^2
@@ -50,6 +52,11 @@ vec3 rotateVector(in vec3 v, in vec3 k, float theta)
     return v*cos(theta) + cross(k, v)*sin(theta) + k*dot(k,v)*(1-cos(theta));
 }
 
+vec3 getTransform(in AtomStruct a)
+{
+    return vec3(modelMatrix[int(a.proteinID)] * vec4(a.center, 1.0));
+}
+
 void calcBond(
     in AtomStruct a1,
     in AtomStruct a2,
@@ -61,7 +68,7 @@ void calcBond(
     float k = entry.x;
     float r0 = entry.y;
 
-    vec3 r = a2.center - a1.center;
+    vec3 r = getTransform(a2) - getTransform(a1);
 
     vec3 f1 = 2*k*(length(r) - r0) * r / length(r);
     vec3 f2 = -f1;
@@ -77,7 +84,7 @@ void calcBondSimple(
     vec4 entry = valuesVector[indexCube[getIndex(int(a1.atomSymbolIndex), int(a2.atomSymbolIndex), 0, 0)]];
     float r0 = entry.y;
 
-    vec3 dir = a2.center - a1.center;
+    vec3 dir = getTransform(a2) - getTransform(a1);
     float r = length(dir);
     dir = normalize(dir);
     float halfDiff = (r-r0) / 2.0;
@@ -96,7 +103,7 @@ void calcVdW(
     vec4 entry2 = valuesVector[indexCube[getIndex(0, int(a2.atomSymbolIndex), 0, 0)]];
     float sigma = entry1.x + entry2.x;
     float epsilon = sqrt(entry1.y * entry2.y);
-    vec3 r = a2.center - a1.center;
+    vec3 r = getTransform(a2) - getTransform(a1);
 
     float scale = 48*epsilon*(pow(sigma/length(r),12) - 0.5*pow(sigma/length(r),6)) / (length(r)*length(r));
     vec3 f1 = scale*r;
@@ -118,8 +125,8 @@ void calcAngle(
     float k = entry.x;
     float a0 = entry.y;
 
-    vec3 v1 = a2.center - a1.center;
-    vec3 v2 = a3.center - a2.center;
+    vec3 v1 = getTransform(a2) - getTransform(a1);
+    vec3 v2 = getTransform(a3) - getTransform(a2);
     float alpha = max(acos(dot(v1,v2) / (length(v1) * length(v2))), EPSILON); // if alpha is zero, set it to the smallest non zero number
 
     vec3 f1 = -2*k*(alpha-a0) / (length(v1) * sin(alpha)) * (v2 - (cos(alpha)*v1));
@@ -141,8 +148,8 @@ void calcAngleSimple(
     vec4 entry = valuesVector[indexCube[getIndex(int(a1.atomSymbolIndex), int(a2.atomSymbolIndex), int(a3.atomSymbolIndex), 0)]];
     float a0 = entry.y;
 
-    vec3 v1 = a1.center - a2.center;
-    vec3 v2 = a3.center - a2.center;
+    vec3 v1 = getTransform(a1) - getTransform(a2);
+    vec3 v2 = getTransform(a3) - getTransform(a2);
 
     vec3 rotationAxis = normalize(cross(v2,v1));
     float theta = max(acos(dot(v1,v2) / (length(v1) * length(v2))), EPSILON);
@@ -171,12 +178,11 @@ void calcDihedral(
     float n = entry.w;
     float delta = entry.z;
 
-    // HERE IS STILL SOME BUG
     if (!(isnan(k) || isinf(k) || isnan(n) || isinf(n) || isnan(delta) || isinf(delta))) // CHECK IF ENTRY IS INVALID
     {
-        vec3 r1 = a2.center - a1.center;
-        vec3 r2 = a3.center - a2.center;
-        vec3 r3 = a4.center - a3.center;
+        vec3 r1 = getTransform(a2) - getTransform(a1);
+        vec3 r2 = getTransform(a3) - getTransform(a2);
+        vec3 r3 = getTransform(a4) - getTransform(a3);
 
         vec3 a = cross(r1,r2);
         vec3 b = cross(r2,r3);
@@ -218,10 +224,10 @@ void calcDihedralSimple(
     vec4 entry = valuesVector[indexCube[getIndex(int(a1.atomSymbolIndex), int(a2.atomSymbolIndex), int(a3.atomSymbolIndex), int(a4.atomSymbolIndex))]];
     float theta = entry.z;
 
-    vec3 v1 = a1.center - a2.center;
-    vec3 v2a = a3.center - a2.center;
+    vec3 v1 = getTransform(a1) - getTransform(a2);
+    vec3 v2a = getTransform(a3) - getTransform(a2);
     vec3 v2b = - v2a;
-    vec3 v3 = a4.center - a3.center;
+    vec3 v3 = getTransform(a4) - getTransform(a3);
 
     // calculate normals of both planes
     vec3 n1 = cross(v1,v2a);
@@ -266,10 +272,10 @@ void calcImpropers(
     float k  = entry.y;
     float n  = entry.w;
 
-    vec3 r1 = a2.center - a1.center;
-    vec3 r2 = a3.center - a2.center;
-    vec3 r3 = a4.center - a3.center;
-    vec3 r4 = a4.center - a1.center;
+    vec3 r1 = getTransform(a2) - getTransform(a1);
+    vec3 r2 = getTransform(a3) - getTransform(a2);
+    vec3 r3 = getTransform(a4) - getTransform(a3);
+    vec3 r4 = getTransform(a4) - getTransform(a1);
 
     vec3 a  = cross(r1,r2);
     vec3 b  = cross(r2,r3);
@@ -313,10 +319,10 @@ void calcImpropersSimple(
     vec4 entry = valuesVector[indexCube[getIndex(int(a1.atomSymbolIndex), int(a2.atomSymbolIndex), int(a3.atomSymbolIndex), int(a4.atomSymbolIndex))]];
     float theta = entry.z;
 
-    vec3 v1 = a2.center - a4.center;
-    vec3 v2 = a3.center - a4.center;
-    vec3 v3 = a3.center - a2.center;
-    vec3 v4 = a1.center - a2.center;
+    vec3 v1 = getTransform(a2) - getTransform(a4);
+    vec3 v2 = getTransform(a3) - getTransform(a4);
+    vec3 v3 = getTransform(a3) - getTransform(a2);
+    vec3 v4 = getTransform(a1) - getTransform(a2);
 
     // calculate normals of both planes
     vec3 n1 = cross(v1,v2);
@@ -374,7 +380,7 @@ int getClosestAtomIdx(int idx, vec3 pos, int proteinID)
 
                 // is the neighbor atom within search radius?
                 AtomStruct currentNeighborAtom = atoms[unsortedNeighborIdx];
-                vec3 currentNeighborPos = currentNeighborAtom.center;
+                vec3 currentNeighborPos = getTransform(currentNeighborAtom);
                 vec3 distance = pos - currentNeighborPos;
                 float d2 = (distance.x * distance.x) + (distance.y * distance.y) + (distance.z * distance.z);
                 if (d2 < searchRadius2 && d2 < closestDistance)
@@ -634,53 +640,43 @@ void main() {
      * then set charge to green, if they point in opposite directions change the
      * charge to red. For all other directions interpolate between green and red.
      */
-    int closestAtomIdx = getClosestAtomIdx(curAtomIdx, curAtom.center, int(curAtom.proteinID));
+    int closestAtomIdx = getClosestAtomIdx(curAtomIdx, getTransform(curAtom), int(curAtom.proteinID));
     if (closestAtomIdx < 0 || closestAtomIdx >= numAtoms)
     {
         atoms[curAtomIdx].charge = vec4(1.0, 1.0, 1.0, alpha);
     }
     else
     {
-        vec3 dirToClosestAtom = atoms[closestAtomIdx].center - atoms[curAtomIdx].center;
+        vec3 dirToClosestAtom = getTransform(atoms[closestAtomIdx]) - getTransform(atoms[curAtomIdx]);
         float dotProduct = dot(resultDir, dirToClosestAtom);
         float resultDirLength = length(resultDir);
         float dirToClosestAtomLength = length(dirToClosestAtom);
         float norm = resultDirLength * dirToClosestAtomLength;
         float weight = acos(dotProduct/norm) / M_PI;
 
-
-        vec4 black  = vec4(0.0, 0.0, 0.0, alpha);
-        vec4 red    = vec4(1.0, 0.0, 0.0, alpha);
-        vec4 yellow = vec4(1.0, 1.0, 0.0, alpha);
-        vec4 cyan   = vec4(0.0, 1.0, 1.0, 1.0);
-        vec4 green  = vec4(0.0, 1.0, 0.0, alpha);
-        vec4 blue   = vec4(0.0, 0.0, 1.0, 1.0);
-        vec4 gray   = vec4(0.3, 0.3, 0.3, 1.0);
-        vec4 purple = vec4(1.0, 0.0, 1.0, 1.0);
-
         if (isinf(dirToClosestAtomLength) || isnan(dirToClosestAtomLength))
         {
-            atoms[curAtomIdx].charge = blue;
+            atoms[curAtomIdx].charge = vec4(0.0, 0.0, 1.0, 1.0);
         }
         else if (isinf(resultDirLength) || isnan(resultDirLength))
         {
-            atoms[curAtomIdx].charge = cyan;
+            atoms[curAtomIdx].charge = vec4(0.0, 1.0, 1.0, 1.0);
         }
         else if (weight < 0.5)
         {
-            atoms[curAtomIdx].charge = green;
+            atoms[curAtomIdx].charge = vec4(0.0, 1.0, 0.0, alpha);
         }
         else if (weight == 0.5)
         {
-            atoms[curAtomIdx].charge = yellow;
+            atoms[curAtomIdx].charge = vec4(1.0, 1.0, 0.0, alpha);
         }
         else if (weight <= 1.0)
         {
-            atoms[curAtomIdx].charge = red;
+            atoms[curAtomIdx].charge = vec4(1.0, 0.0, 0.0, alpha);
         }
         else
         {
-            atoms[curAtomIdx].charge = purple;
+            atoms[curAtomIdx].charge = vec4(1.0, 0.0, 1.0, 1.0);
         }
     }
 }

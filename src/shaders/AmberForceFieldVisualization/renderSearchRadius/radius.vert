@@ -18,7 +18,7 @@ void main()
     /*
      * get atom center for every vertex id
      */
-    gl_Position = vec4(selectedAtomPosition, 1);
-    pos         = vec4(selectedAtomPosition, 1);
+    gl_Position = vec4(selectedAtomPosition, 1.0);
+    pos         = vec4(selectedAtomPosition, 1.0);
     vertRadius  = searchRadius;
 }

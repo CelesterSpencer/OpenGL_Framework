@@ -25,9 +25,8 @@ layout(std430, binding = 0) restrict readonly buffer AtomBuffer { AtomStruct ato
 layout(std430, binding = 10) restrict readonly buffer ModelMatrixBuffer { mat4 modelMatrix[]; };
 
 // Uniforms
-uniform vec3 cameraWorldPos;
 uniform float probeRadius;
-uniform int proteinNum;
+
 
 // Main function
 void main()
@@ -42,6 +41,6 @@ void main()
     /*
      * get the radius and charge for the corresponding atom
      */
-    vertRadius = atoms[index].radius + probeRadius;
+    vertRadius = atom.radius + probeRadius;
     vertColor = vec4(normalize(atoms[index].charge.xyz), atoms[index].charge.w);
 }

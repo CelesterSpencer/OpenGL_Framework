@@ -22,6 +22,7 @@ struct AtomStruct
 
 // SSBOs
 layout(std430, binding = 0) restrict readonly buffer AtomBuffer { AtomStruct atoms[]; };
+layout(std430, binding = 10) restrict readonly buffer ModelMatrixBuffer { mat4 modelMatrix[]; };
 
 // Uniforms
 uniform float probeRadius;
@@ -33,11 +34,12 @@ void main()
      * get atom center for every vertex id
      */
     int index = int(gl_VertexID);
+    AtomStruct atom = atoms[index];
     atomID = index;
-    gl_Position = vec4(atoms[index].center, 1);
+    gl_Position = modelMatrix[int(atom.proteinID)] * vec4(atom.center, 1);
 
     /*
      * get the radius for the corresponding atom
      */
-    vertRadius = atoms[index].radius + probeRadius;
+    vertRadius = atom.radius + probeRadius;
 }

@@ -25,6 +25,8 @@ public:
     std::vector<SimpleAtom> atoms;
     glm::vec3 bbMin;
     glm::vec3 bbMax;
+    glm::mat4 rotationMatrix;
+    glm::mat4 translationMatrix;
 
     //_____________________________________//
     //           CONSTRUCTOR               //
@@ -33,6 +35,8 @@ public:
     {
         bbMin = glm::vec3(0, 0, 0);
         bbMax = glm::vec3(0, 0, 0);
+        rotationMatrix = glm::mat4();
+        translationMatrix = glm::mat4();
     }
 
     void setName(std::string name)
@@ -47,18 +51,33 @@ public:
 
     void move(glm::vec3 offset)
     {
-        for (int i = 0; i < atoms.size(); i++) {
-            atoms.at(i).pos += offset;
-        }
-        bbMin += offset;
-        bbMax += offset;
+        glm::mat4 translationMat = glm::translate(offset);
+        translationMatrix = translationMat * translationMatrix;
+        recalculateBB();
+    }
+
+    void rotate(glm::vec3 axis, float angle)
+    {
+        glm::mat4 rotationMat = glm::rotate(angle, axis);
+        rotationMatrix = rotationMat * rotationMatrix;
+        recalculateBB();
+    }
+
+    void applyRotationMatrix(glm::mat4 mat)
+    {
+        rotationMatrix = mat * rotationMatrix;
+    }
+
+    void applyTranslationMatrix(glm::mat4 mat)
+    {
+        translationMatrix = mat * translationMatrix;
     }
 
     glm::vec3 getCenterOfGravity()
     {
         glm::vec3 cog = glm::vec3(0,0,0);
         for (int i = 0; i < atoms.size(); i++) {
-            cog += atoms.at(i).pos;
+            cog += glm::vec3(translationMatrix * rotationMatrix * glm::vec4(atoms.at(i).pos, 1.0));
         }
         if (atoms.size() > 0) cog /= atoms.size();
         return cog;
@@ -70,8 +89,7 @@ public:
         for (int i = 0; i < atoms.size(); i++) {
             atoms.at(i).pos -= cog;
         }
-        bbMin -= cog;
-        bbMax -= cog;
+        recalculateBB();
     }
 
     void recalculateBB()
@@ -81,12 +99,13 @@ public:
             bbMax = glm::vec3(FLOAT_MIN, FLOAT_MIN, FLOAT_MIN);
             for (int i = 0; i < atoms.size(); i++) {
                 SimpleAtom atom = atoms.at(i);
-                bbMin.x = glm::min(bbMin.x, atom.pos.x);
-                bbMin.y = glm::min(bbMin.y, atom.pos.y);
-                bbMin.z = glm::min(bbMin.z, atom.pos.z);
-                bbMax.x = glm::max(bbMax.x, atom.pos.x);
-                bbMax.y = glm::max(bbMax.y, atom.pos.y);
-                bbMax.z = glm::max(bbMax.z, atom.pos.z);
+                glm::vec4 transformedPos = rotationMatrix * translationMatrix * glm::vec4(atom.pos, 1.0);
+                bbMin.x = glm::min(bbMin.x, transformedPos.x);
+                bbMin.y = glm::min(bbMin.y, transformedPos.y);
+                bbMin.z = glm::min(bbMin.z, transformedPos.z);
+                bbMax.x = glm::max(bbMax.x, transformedPos.x);
+                bbMax.y = glm::max(bbMax.y, transformedPos.y);
+                bbMax.z = glm::max(bbMax.z, transformedPos.z);
             }
         } else {
             Logger::instance().print("No atoms to recalculate BB!", Logger::Mode::WARNING);

@@ -301,6 +301,7 @@ void ProteinLoader::loadPDB(std::string filePath, SimpleProtein &protein, std::m
             atom.atomSymbolIndex = atomSymbolsMap[elementName]+1;                   // +1 because the first atom should start with 1
             atom.proteinID = m_currentProteinIdx;
             std::cout << elementName << ": " << atom.atomSymbolIndex << std::endl;
+
             /*
              * get all neighbors
              */
@@ -345,7 +346,8 @@ void ProteinLoader::loadPDB(std::string filePath, SimpleProtein &protein, std::m
 
 void ProteinLoader::getBoundingBoxAroundProteins(glm::vec3& min, glm::vec3& max)
 {
-    if (m_proteins.size() > 0) {
+    if (m_proteins.size() > 0)
+    {
         min = glm::vec3(FLOAT_MAX, FLOAT_MAX, FLOAT_MAX);
         max = glm::vec3(FLOAT_MIN, FLOAT_MIN, FLOAT_MIN);
         for (int i = 0; i < m_proteins.size(); i++)
@@ -358,7 +360,9 @@ void ProteinLoader::getBoundingBoxAroundProteins(glm::vec3& min, glm::vec3& max)
             max.y = glm::max(max.y, protein->bbMax.y);
             max.z = glm::max(max.z, protein->bbMax.z);
         }
-    } else {
+    }
+    else
+    {
         Logger::instance().print("No proteins there to calculate bounding box!", Logger::Mode::WARNING);
         min = glm::vec3(0,0,0);
         max = glm::vec3(0,0,0);
