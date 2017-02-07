@@ -10,11 +10,13 @@ layout(triangle_strip, max_vertices = 3) out;
 
 in vec4 vertColor[1];
 in float vertRadius[1];
+in float pID[1];
 
 out vec2 uv;
 flat out float radius;
 flat out vec3 position;
 flat out vec4 color;
+flat out float proteinID;
 
 uniform mat4 projection;
 uniform mat4 view;
@@ -31,6 +33,7 @@ void main()
      */
     color = vertColor[0];
     radius = vertRadius[0];
+    proteinID = pID[0];
 
     /*
      * GLSL is column-major! Get world space camera vectors

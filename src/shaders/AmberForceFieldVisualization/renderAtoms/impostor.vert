@@ -7,6 +7,7 @@
 // Color of impostor
 out vec4 vertColor;
 out float vertRadius;
+out float pID;
 
 // Struct for atom
 struct AtomStruct
@@ -37,6 +38,7 @@ void main()
     int index = int(gl_VertexID);
     AtomStruct atom = atoms[index];
     gl_Position = modelMatrix[int(atom.proteinID)] * vec4(atom.center, 1);
+    pID = atom.proteinID;
 
     /*
      * get the radius and charge for the corresponding atom

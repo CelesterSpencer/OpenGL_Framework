@@ -86,6 +86,7 @@ public:
     void center()
     {
         glm::vec3 cog = getCenterOfGravity();
+        move(cog);
         for (int i = 0; i < atoms.size(); i++) {
             atoms.at(i).pos -= cog;
         }

@@ -8,9 +8,12 @@ in vec2 uv;
 flat in float radius;
 flat in vec3 position;
 flat in vec4 color;
+flat in float proteinID;
 
 out vec4 outColor;
 layout (depth_less) out float gl_FragDepth; // Makes optimizations possible
+
+layout(std430, binding = 11) restrict readonly buffer ProteinColorsBuffer { vec4 proteinColor[]; };
 
 uniform mat4 view;
 uniform mat4 projection;
@@ -29,7 +32,6 @@ void main()
     {
         discard;
     }
-
     /*
      * Calculate normal of sphere
      * calculate dotproduct to get the depth
@@ -69,9 +71,16 @@ void main()
     specular *= 0.5 * lighting;
 
     // Some "ambient" lighting combined with specular
-    vec3 ambientColor = vec3(0.5, 0.5, 0.5);
-    vec3 finalColor = mix(color.xyz * mix(ambientColor, vec3(1.0, 1.0, 1.0), lighting), vec3(1,1,1), specular);
+    vec3 ambientColor = vec3(0.0, 0.0, 0.0);
+    vec3 finalColor = mix(proteinColor[int(proteinID)].xyz * mix(ambientColor, vec3(1.0, 1.0, 1.0), lighting), vec3(1.0, 1.0, 1.0), specular);
 
     // Output color
-    outColor = vec4(finalColor, color.w);
+    if (distance > 0.8 && color.w != 0.0)
+    {
+        outColor = color;
+    }
+    else
+    {
+        outColor = vec4(finalColor, 1.0);
+    }
 }
