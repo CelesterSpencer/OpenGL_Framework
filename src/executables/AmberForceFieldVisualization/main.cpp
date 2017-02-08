@@ -85,7 +85,11 @@ ShaderProgram m_drawSearchRadiusShader;
 NeighborhoodSearch m_search;
 GLuint m_positionsSSBO;
 GLuint m_searchResultsSSBO;
-float m_searchRadius = 20.f;
+glm::vec3 m_gridResolution = glm::vec3(10.0, 10.0, 10.0);
+float m_searchRadius = 10.f;
+GLuint m_gridVBO;
+GLuint m_gridVAO;
+bool m_isGridVisible = false;
 
 // amber force calculation
 bool useSimplifiedCalculation = false;
@@ -96,6 +100,7 @@ ShaderProgram m_impostorProgram;
 GLuint m_pointsVBO;
 GLuint m_pointsVAO;
 int    m_numVBOEntries;
+bool m_drawSelectedProtein = false;
 
 
 
@@ -319,6 +324,348 @@ void mousePositionCallback(double xpos, double ypos)
 
 
 /*
+ * UPDATE
+ */
+void resetNeighborhoodSearch()
+{
+    glm::vec3 min, max;
+    m_proteinLoader.getCenteredBoundingBoxAroundProteins(min, max);
+    m_search.update(m_proteinLoader.getNumberOfAllAtoms(), min, max, m_gridResolution, m_searchRadius);
+}
+
+/*
+ * DRAWING
+ */
+void drawSelectionRadius()
+{
+    glEnable(GL_BLEND);
+    glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+
+    m_drawSearchRadiusShader.use();
+    SimpleAtom selectedAtom = m_proteinLoader.getAllAtoms().at(m_selectedAtom);
+    SimpleProtein* selectedProtein = m_proteinLoader.getProteinAt(m_selectedProtein);
+    glm::mat4 tempModelMatrix = selectedProtein->rotationMatrix;
+    if (m_interactionMode == 1)
+    {
+        tempModelMatrix = m_tempModelMatrix * selectedProtein->translationMatrix * tempModelMatrix;
+    }
+    else if (m_interactionMode == 2)
+    {
+        tempModelMatrix = selectedProtein->translationMatrix * m_tempModelMatrix * tempModelMatrix;
+    }
+    else
+    {
+        tempModelMatrix = selectedProtein->translationMatrix * tempModelMatrix;
+    }
+    m_drawSearchRadiusShader.update("selectedAtomPosition", glm::vec3(tempModelMatrix * glm::vec4(selectedAtom.pos, 1.0)));
+    m_drawSearchRadiusShader.update("searchRadius", m_searchRadius);
+    m_drawSearchRadiusShader.update("view", mp_camera->getViewMatrix());
+    m_drawSearchRadiusShader.update("projection", mp_camera->getProjectionMatrix());
+    glDrawArrays(GL_POINTS, 0, 1);
+    glBindVertexArray(0);
+
+    glDisable(GL_BLEND);
+}
+void drawGizmo()
+{
+    /*
+  * get the center of gravity for the selected protein in camera space
+  */
+    SimpleProtein* selectedProtein = m_proteinLoader.getProteinAt(m_selectedProtein);
+    glm::vec3 proteinCenterOfGravity = selectedProtein->getCenterOfGravity();
+    glm::vec4 proteinCenterOfGravityCameraSpace = mp_camera->getViewMatrix() * glm::vec4(proteinCenterOfGravity, 1.0);
+
+    /*
+     * unproject the cursor position into camera space
+     */
+    glm::vec4 viewport = glm::vec4(0.0, 0.0, WIDTH, HEIGHT);
+
+    // project the center of gravity
+    glm::vec4 proteinCenterOfGravityProjected = mp_camera->getProjectionMatrix() * proteinCenterOfGravityCameraSpace;
+    glm::vec2 proteinCenterOfGravity2D;
+    proteinCenterOfGravity2D.x = round(((proteinCenterOfGravityProjected.x/proteinCenterOfGravityProjected.w+1) /2.0) * WIDTH);
+    proteinCenterOfGravity2D.y = HEIGHT - round(((proteinCenterOfGravityProjected.y/proteinCenterOfGravityProjected.w+1) /2.0) * HEIGHT);
+    float proteinCenterOfGravityDepth = proteinCenterOfGravityProjected.z / proteinCenterOfGravityProjected.w;
+
+    // reset mouse position if necessary
+    if (m_resetStartMousePosition)
+    {
+        m_startMousePosition = m_currentMousePosition;
+        m_resetStartMousePosition = false;
+    }
+
+    // current cursor position
+    glm::vec3 pos3DCurrentCursor = mp_camera->getPositionAtPixel((int)m_currentMousePosition.x, (int)m_currentMousePosition.y);
+    glm::vec3 cursorPosition = glm::vec3(m_currentMousePosition, proteinCenterOfGravityDepth);
+    glm::vec3 unprojectedCursorPosition = glm::unProject(cursorPosition, mp_camera->getViewMatrix(), mp_camera->getProjectionMatrix(), viewport);
+    glm::vec4 unprojectedCursorPositionCameraSpace = mp_camera->getViewMatrix() * glm::vec4(unprojectedCursorPosition, 1.0);
+    // start cursor position
+    glm::vec3 pos3DStartCursor = mp_camera->getPositionAtPixel((int)m_startMousePosition.x, (int)m_startMousePosition.y);
+    glm::vec3 cursorStartPosition = glm::vec3(m_startMousePosition, proteinCenterOfGravityDepth);
+    glm::vec3 unprojectedCursorStartPosition = glm::unProject(cursorStartPosition, mp_camera->getViewMatrix(), mp_camera->getProjectionMatrix(), viewport);
+    glm::vec4 unprojectedCursorStartPositionCameraSpace = mp_camera->getViewMatrix() * glm::vec4(unprojectedCursorStartPosition, 1.0);
+
+    // for the translation
+    glm::vec4 unprojectedRestrictedPositionCameraSpace;
+    glm::vec2 deltaDir = m_currentMousePosition - m_startMousePosition;
+    if (abs(deltaDir.x) > abs(deltaDir.y))
+    {
+        glm::vec3 restrictedPosition = glm::vec3(m_currentMousePosition.x, m_startMousePosition.y, 0.2);
+        glm::vec3 unprojectedRestrictedPosition = glm::unProject(restrictedPosition, mp_camera->getViewMatrix(), mp_camera->getProjectionMatrix(), viewport);
+        unprojectedRestrictedPositionCameraSpace = mp_camera->getViewMatrix() * glm::vec4(unprojectedRestrictedPosition, 1.0);
+    }
+    else
+    {
+        glm::vec3 restrictedPosition = glm::vec3(m_startMousePosition.x, m_currentMousePosition.y, 0.2);
+        glm::vec3 unprojectedRestrictedPosition = glm::unProject(restrictedPosition, mp_camera->getViewMatrix(), mp_camera->getProjectionMatrix(), viewport);
+        unprojectedRestrictedPositionCameraSpace = mp_camera->getViewMatrix() * glm::vec4(unprojectedRestrictedPosition, 1.0);
+    }
+
+    /*
+     * upload points to gpu
+     */
+    std::vector<glm::vec4> points;
+    if (m_interactionMode == 1)
+    {
+        points.push_back(unprojectedCursorStartPositionCameraSpace);
+        points.push_back(unprojectedRestrictedPositionCameraSpace);
+    }
+    else if (m_interactionMode == 2)
+    {
+        points.push_back(proteinCenterOfGravityCameraSpace);
+        points.push_back(unprojectedCursorStartPositionCameraSpace);
+        points.push_back(proteinCenterOfGravityCameraSpace);
+        points.push_back(unprojectedCursorPositionCameraSpace);
+    }
+
+    GLuint pointsVBO = 0;
+    glGenBuffers(1, &pointsVBO);
+    glBindBuffer(GL_ARRAY_BUFFER, pointsVBO);
+    glBufferData(GL_ARRAY_BUFFER, points.size()*4*sizeof(float), points.data(), GL_STATIC_DRAW);
+    GLuint pointsVAO = 0;
+    glGenVertexArrays(1, &pointsVAO);
+    glBindVertexArray(pointsVAO);
+    glVertexAttribPointer(0, 4, GL_FLOAT, GL_FALSE, 0, 0);
+    // disable vbo
+    glEnableVertexAttribArray(0);
+
+    /*
+     * draw a line between the center of gravity and the unprojected mouse position
+     */
+    glEnable(GL_BLEND);
+    glDisable(GL_DEPTH_TEST);
+    glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+    glLineWidth(3.0);
+    m_linesShader.use();
+    m_linesShader.update("projMat", mp_camera->getProjectionMatrix());
+    glDrawArrays(GL_LINES, 0, points.size());
+    glLineWidth(1.0);
+    glEnable(GL_DEPTH_TEST);
+    glDisable(GL_BLEND);
+
+    // delete buffers
+    glBindVertexArray(0);
+    glDeleteBuffers(1, &pointsVBO);
+    glDeleteVertexArrays(1, &pointsVAO);
+
+
+    /*
+     * handle the interaction
+     */
+    // apply the right interaction
+    if (m_interactionMode == 1) // TRANSLATION
+    {
+        glm::vec3 deltaDir = unprojectedCursorPositionCameraSpace - unprojectedCursorStartPositionCameraSpace;
+        if (abs(deltaDir.x) > abs(deltaDir.y))
+        {
+            glm::vec3 at = glm::normalize(mp_camera->getCenter() - mp_camera->getPosition());
+            glm::vec3 right = glm::normalize(glm::cross(at, glm::vec3(0.0, 1.0, 0.0)));
+            m_tempModelMatrix = glm::translate(right*deltaDir.x);
+        }
+        else
+        {
+            glm::vec3 at = glm::normalize(mp_camera->getCenter() - mp_camera->getPosition());
+            glm::vec3 right = glm::normalize(glm::cross(at, glm::vec3(0.0, 1.0, 0.0)));
+            glm::vec3 up = glm::normalize(glm::cross(right, at));
+            m_tempModelMatrix = glm::translate(up*deltaDir.y);
+        }
+    }
+
+    if (m_interactionMode == 2) // ROTATION
+    {
+        glm::vec2 v1 = m_startMousePosition - proteinCenterOfGravity2D;
+        v1 = glm::normalize(v1);
+        glm::vec2 v2 = m_currentMousePosition - proteinCenterOfGravity2D;
+        v2 = glm::normalize(v2);
+
+        float angle = glm::orientedAngle(v1, v2); // * 180 / M_PI;
+
+        m_tempModelMatrix = glm::rotate(angle, mp_camera->getPosition() - mp_camera->getCenter());
+    }
+}
+void updateGrid()
+{
+    /*
+     * update the grid dimensions
+     */
+    glm::vec3 min, max;
+    m_search.getGridMinMax(min, max);
+
+    float cellSize = m_search.getCellSize();
+    glm::ivec3 gridRes = m_search.getGridResolution();
+
+
+
+    /*
+     * update the visual grid representation
+     */
+    /*
+     * grid hull
+     */
+    std::vector<glm::vec4> points;
+    glm::vec4 p1 = glm::vec4(min.x, min.y, min.z, 1);
+    glm::vec4 p2 = glm::vec4(max.x, min.y, min.z, 1);
+    glm::vec4 p3 = glm::vec4(min.x, min.y, max.z, 1);
+    glm::vec4 p4 = glm::vec4(max.x, min.y, max.z, 1);
+    glm::vec4 p5 = glm::vec4(min.x, max.y, min.z, 1);
+    glm::vec4 p6 = glm::vec4(max.x, max.y, min.z, 1);
+    glm::vec4 p7 = glm::vec4(min.x, max.y, max.z, 1);
+    glm::vec4 p8 = glm::vec4(max.x, max.y, max.z, 1);
+    // bottom
+    points.push_back(p1);
+    points.push_back(p2);
+    points.push_back(p1);
+    points.push_back(p3);
+    points.push_back(p2);
+    points.push_back(p4);
+    points.push_back(p3);
+    points.push_back(p4);
+    // side
+    points.push_back(p1);
+    points.push_back(p5);
+    points.push_back(p2);
+    points.push_back(p6);
+    points.push_back(p3);
+    points.push_back(p7);
+    points.push_back(p4);
+    points.push_back(p8);
+    // top
+    points.push_back(p5);
+    points.push_back(p6);
+    points.push_back(p5);
+    points.push_back(p7);
+    points.push_back(p6);
+    points.push_back(p8);
+    points.push_back(p7);
+    points.push_back(p8);
+
+    m_numVBOEntries = 24;
+
+    /*
+     * grid cell divisions
+     */
+    float xs[2] = {min.x, max.x};
+    float ys[2] = {min.y, max.y};
+    float zs[2] = {min.z, max.z};
+
+    // x resolution
+    for (int i = 0; i < gridRes.x; i++) {
+        float x = min.x + (i * cellSize);
+        for (int j = 0; j < 2; j++) {
+            for (int k = 0; k < 2; k++) {
+                float y = ys[j];
+                float z = zs[k];
+                points.push_back(glm::vec4(x, y, z, 1));
+                m_numVBOEntries++;
+            }
+        }
+        for (int j = 0; j < 2; j++) {
+            for (int k = 0; k < 2; k++) {
+                float y = ys[k];
+                float z = zs[j];
+                points.push_back(glm::vec4(x, y, z, 1));
+                m_numVBOEntries++;
+            }
+        }
+    }
+
+    // y resolution
+    for (int i = 0; i < gridRes.y; i++) {
+        float y = min.y + (i * cellSize);
+        for (int j = 0; j < 2; j++) {
+            for (int k = 0; k < 2; k++) {
+                float x = xs[j];
+                float z = zs[k];
+                points.push_back(glm::vec4(x, y, z, 1));
+                m_numVBOEntries++;
+            }
+        }
+        for (int j = 0; j < 2; j++) {
+            for (int k = 0; k < 2; k++) {
+                float x = xs[k];
+                float z = zs[j];
+                points.push_back(glm::vec4(x, y, z, 1));
+                m_numVBOEntries++;
+            }
+        }
+    }
+
+    // z resolution
+    for (int i = 0; i < gridRes.z; i++) {
+        float z = min.z + (i * cellSize);
+        for (int j = 0; j < 2; j++) {
+            for (int k = 0; k < 2; k++) {
+                float x = xs[j];
+                float y = ys[k];
+                points.push_back(glm::vec4(x, y, z, 1));
+                m_numVBOEntries++;
+            }
+        }
+        for (int j = 0; j < 2; j++) {
+            for (int k = 0; k < 2; k++) {
+                float x = xs[k];
+                float y = ys[j];
+                points.push_back(glm::vec4(x, y, z, 1));
+                m_numVBOEntries++;
+            }
+        }
+    }
+
+    if (m_pointsVBO != 0) glDeleteBuffers(1, &m_pointsVBO);
+    m_pointsVBO = 0;
+    glGenBuffers(1, &m_gridVBO);
+    glBindBuffer(GL_ARRAY_BUFFER, m_gridVBO);
+    glBufferData(GL_ARRAY_BUFFER, points.size() * 4 * sizeof(float), points.data(), GL_STATIC_DRAW);
+
+    if (m_pointsVAO != 0) glDeleteVertexArrays(1, &m_gridVAO);
+    m_gridVAO = 0;
+    glGenVertexArrays(1, &m_gridVAO);
+    glBindVertexArray(m_gridVAO);
+    glVertexAttribPointer(0, 4, GL_FLOAT, GL_FALSE, 0, 0);
+
+    // disable the vao and vbo
+    glEnableVertexAttribArray(0);
+    glBindVertexArray(0);
+}
+void drawGrid()
+{
+    glEnable(GL_BLEND);
+    glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+
+    glBindVertexArray(m_gridVAO);
+
+    m_linesShader.use();
+    //m_linesShader.update("viewMat", mp_camera->getViewMatrix());
+    m_linesShader.update("projMat", mp_camera->getProjectionMatrix() * mp_camera->getViewMatrix());
+    glDrawArrays(GL_LINES, 0, m_numVBOEntries);
+
+    glBindVertexArray(0);
+
+    glDisable(GL_BLEND);
+}
+
+
+/*
  * SETUP AND MAINLOOP
  */
 void run()
@@ -452,16 +799,19 @@ void run()
         int numBlocks = ceil((float)m_proteinLoader.getNumberOfAllAtoms() / BLOCK_SIZE);
         glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 0, m_atomsSSBO);
         glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 1, m_positionsSSBO);
+        glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 2, m_modelMatricesBuffer);
         m_extractAtomPositionsShader.use();
         m_extractAtomPositionsShader.update("pnum",m_proteinLoader.getNumberOfAllAtoms());
         glDispatchCompute(numBlocks,1,1);
         glMemoryBarrier(GL_ALL_BARRIER_BITS);
         glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 0, 0);
         glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 1, 0);
+        glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 2, 0);
 
         /*
          * find neighborhood
          */
+        resetNeighborhoodSearch();
         m_search.run(&m_positionsSSBO, neighborhood);
 
 
@@ -495,6 +845,7 @@ void run()
         m_calcChargeProgram.update("gridAdjCnt", neighborhood.numberOfSearchCells);
         m_calcChargeProgram.update("searchCellOff", neighborhood.startCellOffset);
         m_calcChargeProgram.update("useSimplifiedCalculation", useSimplifiedCalculation);
+        m_calcChargeProgram.update("selectedAtomID", m_selectedAtom);
         glDispatchCompute(ceil(m_proteinLoader.getNumberOfAllAtoms()/256.0), 1, 1);
         glUniform1iv(glGetUniformLocation(m_calcChargeProgram.getProgramHandle(),"gridAdj"), 216, neighborhood.p_searchCellOffsets);
         glMemoryBarrier (GL_ALL_BARRIER_BITS);
@@ -502,12 +853,6 @@ void run()
         /*
          * draw proteins as impostor
          */
-        /*
-        glEnable(GL_BLEND);
-        glDepthMask(GL_FALSE);
-        glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
-        */
-
         glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 0, m_atomsSSBO);
         m_impostorProgram.use();
         m_impostorProgram.update("view", mp_camera->getViewMatrix());
@@ -515,12 +860,10 @@ void run()
         m_impostorProgram.update("cameraWorldPos", mp_camera->getPosition());
         m_impostorProgram.update("probeRadius", 0.f);
         m_impostorProgram.update("lightDir", m_lightDirection);
+        m_impostorProgram.update("selectedProtein", m_selectedProtein);
+        m_impostorProgram.update("drawSelectedProteinOnly", m_drawSelectedProtein);
         glDrawArrays(GL_POINTS, 0, (GLsizei)m_proteinLoader.getNumberOfAllAtoms());
 
-        /*
-        glDisable(GL_BLEND);
-        glDepthMask(GL_TRUE);
-        */
 
         /*
          * fill id picking texture with atom ids
@@ -557,177 +900,27 @@ void run()
          */
         if (m_selectedAtom >= 0 && m_selectedAtom < m_proteinLoader.getNumberOfAllAtoms() && m_selectedProtein >= 0 && m_selectedProtein < m_proteinLoader.getNumberOfProteins())
         {
-            glEnable(GL_BLEND);
-            glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
-
-            m_drawSearchRadiusShader.use();
-            SimpleAtom selectedAtom = m_proteinLoader.getAllAtoms().at(m_selectedAtom);
-            SimpleProtein* selectedProtein = m_proteinLoader.getProteinAt(m_selectedProtein);
-            glm::mat4 tempModelMatrix = selectedProtein->rotationMatrix;
-            if (m_interactionMode == 1)
-            {
-                tempModelMatrix = m_tempModelMatrix * selectedProtein->translationMatrix * tempModelMatrix;
-            }
-            else if (m_interactionMode == 2)
-            {
-                tempModelMatrix = selectedProtein->translationMatrix * m_tempModelMatrix * tempModelMatrix;
-            }
-            else
-            {
-                tempModelMatrix = selectedProtein->translationMatrix * tempModelMatrix;
-            }
-            m_drawSearchRadiusShader.update("selectedAtomPosition", glm::vec3(tempModelMatrix * glm::vec4(selectedAtom.pos, 1.0)));
-            m_drawSearchRadiusShader.update("searchRadius", m_searchRadius);
-            m_drawSearchRadiusShader.update("view", mp_camera->getViewMatrix());
-            m_drawSearchRadiusShader.update("projection", mp_camera->getProjectionMatrix());
-            glDrawArrays(GL_POINTS, 0, 1);
-            glBindVertexArray(0);
-
-            glDisable(GL_BLEND);
+            drawSelectionRadius();
         }
 
 
 
         /*
-         * draw line from protein center of gravity to unprojected mouse position
+         * drawing the gizmo
          */
         // only do something when a valid protein is selected
         if (m_selectedProtein >= 0 && m_selectedProtein < m_proteinLoader.getNumberOfProteins() && (m_interactionMode == 1 || m_interactionMode == 2))
         {
-            /*
-             * get the center of gravity for the selected protein in camera space
-             */
-            SimpleProtein* selectedProtein = m_proteinLoader.getProteinAt(m_selectedProtein);
-            glm::vec3 proteinCenterOfGravity = selectedProtein->getCenterOfGravity();
-            glm::vec4 proteinCenterOfGravityCameraSpace = mp_camera->getViewMatrix() * glm::vec4(proteinCenterOfGravity, 1.0);
+            drawGizmo();
+        }
 
-            /*
-             * unproject the cursor position into camera space
-             */
-            glm::vec4 viewport = glm::vec4(0.0, 0.0, WIDTH, HEIGHT);
-
-            // project the center of gravity
-            glm::vec4 proteinCenterOfGravityProjected = mp_camera->getProjectionMatrix() * proteinCenterOfGravityCameraSpace;
-            glm::vec2 proteinCenterOfGravity2D;
-            proteinCenterOfGravity2D.x = round(((proteinCenterOfGravityProjected.x/proteinCenterOfGravityProjected.w+1) /2.0) * WIDTH);
-            proteinCenterOfGravity2D.y = HEIGHT - round(((proteinCenterOfGravityProjected.y/proteinCenterOfGravityProjected.w+1) /2.0) * HEIGHT);
-            float proteinCenterOfGravityDepth = proteinCenterOfGravityProjected.z / proteinCenterOfGravityProjected.w;
-
-            // reset mouse position if necessary
-            if (m_resetStartMousePosition)
-            {
-                m_startMousePosition = m_currentMousePosition;
-                m_resetStartMousePosition = false;
-            }
-
-            // current cursor position
-            glm::vec3 pos3DCurrentCursor = mp_camera->getPositionAtPixel((int)m_currentMousePosition.x, (int)m_currentMousePosition.y);
-            glm::vec3 cursorPosition = glm::vec3(m_currentMousePosition, proteinCenterOfGravityDepth);
-            glm::vec3 unprojectedCursorPosition = glm::unProject(cursorPosition, mp_camera->getViewMatrix(), mp_camera->getProjectionMatrix(), viewport);
-            glm::vec4 unprojectedCursorPositionCameraSpace = mp_camera->getViewMatrix() * glm::vec4(unprojectedCursorPosition, 1.0);
-            // start cursor position
-            glm::vec3 pos3DStartCursor = mp_camera->getPositionAtPixel((int)m_startMousePosition.x, (int)m_startMousePosition.y);
-            glm::vec3 cursorStartPosition = glm::vec3(m_startMousePosition, proteinCenterOfGravityDepth);
-            glm::vec3 unprojectedCursorStartPosition = glm::unProject(cursorStartPosition, mp_camera->getViewMatrix(), mp_camera->getProjectionMatrix(), viewport);
-            glm::vec4 unprojectedCursorStartPositionCameraSpace = mp_camera->getViewMatrix() * glm::vec4(unprojectedCursorStartPosition, 1.0);
-
-            // for the translation
-            glm::vec4 unprojectedRestrictedPositionCameraSpace;
-            glm::vec2 deltaDir = m_currentMousePosition - m_startMousePosition;
-            if (abs(deltaDir.x) > abs(deltaDir.y))
-            {
-                glm::vec3 restrictedPosition = glm::vec3(m_currentMousePosition.x, m_startMousePosition.y, 0.2);
-                glm::vec3 unprojectedRestrictedPosition = glm::unProject(restrictedPosition, mp_camera->getViewMatrix(), mp_camera->getProjectionMatrix(), viewport);
-                unprojectedRestrictedPositionCameraSpace = mp_camera->getViewMatrix() * glm::vec4(unprojectedRestrictedPosition, 1.0);
-            }
-            else
-            {
-                glm::vec3 restrictedPosition = glm::vec3(m_startMousePosition.x, m_currentMousePosition.y, 0.2);
-                glm::vec3 unprojectedRestrictedPosition = glm::unProject(restrictedPosition, mp_camera->getViewMatrix(), mp_camera->getProjectionMatrix(), viewport);
-                unprojectedRestrictedPositionCameraSpace = mp_camera->getViewMatrix() * glm::vec4(unprojectedRestrictedPosition, 1.0);
-            }
-
-            /*
-             * upload points to gpu
-             */
-            std::vector<glm::vec4> points;
-            if (m_interactionMode == 1)
-            {
-                points.push_back(unprojectedCursorStartPositionCameraSpace);
-                points.push_back(unprojectedRestrictedPositionCameraSpace);
-            }
-            else if (m_interactionMode == 2)
-            {
-                points.push_back(proteinCenterOfGravityCameraSpace);
-                points.push_back(unprojectedCursorStartPositionCameraSpace);
-                points.push_back(proteinCenterOfGravityCameraSpace);
-                points.push_back(unprojectedCursorPositionCameraSpace);
-            }
-
-            GLuint pointsVBO = 0;
-            glGenBuffers(1, &pointsVBO);
-            glBindBuffer(GL_ARRAY_BUFFER, pointsVBO);
-            glBufferData(GL_ARRAY_BUFFER, points.size()*4*sizeof(float), points.data(), GL_STATIC_DRAW);
-            GLuint pointsVAO = 0;
-            glGenVertexArrays(1, &pointsVAO);
-            glBindVertexArray(pointsVAO);
-            glVertexAttribPointer(0, 4, GL_FLOAT, GL_FALSE, 0, 0);
-            // disable vbo
-            glEnableVertexAttribArray(0);
-
-            /*
-             * draw a line between the center of gravity and the unprojected mouse position
-             */
-            glEnable(GL_BLEND);
-            glDisable(GL_DEPTH_TEST);
-            glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
-            glLineWidth(3.0);
-            m_linesShader.use();
-            m_linesShader.update("projMat", mp_camera->getProjectionMatrix());
-            glDrawArrays(GL_LINES, 0, points.size());
-            glLineWidth(1.0);
-            glEnable(GL_DEPTH_TEST);
-            glDisable(GL_BLEND);
-
-            // delete buffers
-            glBindVertexArray(0);
-            glDeleteBuffers(1, &pointsVBO);
-            glDeleteVertexArrays(1, &pointsVAO);
-
-
-            /*
-             * handle the interaction
-             */
-            // apply the right interaction
-            if (m_interactionMode == 1) // TRANSLATION
-            {
-                glm::vec3 deltaDir = unprojectedCursorPositionCameraSpace - unprojectedCursorStartPositionCameraSpace;
-                if (abs(deltaDir.x) > abs(deltaDir.y))
-                {
-                    glm::vec3 at = glm::normalize(mp_camera->getCenter() - mp_camera->getPosition());
-                    glm::vec3 right = glm::normalize(glm::cross(at, glm::vec3(0.0, 1.0, 0.0)));
-                    m_tempModelMatrix = glm::translate(right*deltaDir.x);
-                }
-                else
-                {
-                    glm::vec3 at = glm::normalize(mp_camera->getCenter() - mp_camera->getPosition());
-                    glm::vec3 right = glm::normalize(glm::cross(at, glm::vec3(0.0, 1.0, 0.0)));
-                    glm::vec3 up = glm::normalize(glm::cross(right, at));
-                    m_tempModelMatrix = glm::translate(up*deltaDir.y);
-                }
-            }
-
-            if (m_interactionMode == 2) // ROTATION
-            {
-                glm::vec2 v1 = m_startMousePosition - proteinCenterOfGravity2D;
-                v1 = glm::normalize(v1);
-                glm::vec2 v2 = m_currentMousePosition - proteinCenterOfGravity2D;
-                v2 = glm::normalize(v2);
-
-                float angle = glm::orientedAngle(v1, v2); // * 180 / M_PI;
-
-                m_tempModelMatrix = glm::rotate(angle, mp_camera->getPosition() - mp_camera->getCenter());
-            }
+        /*
+         * draw grid
+         */
+        if (m_isGridVisible)
+        {
+            updateGrid();
+            drawGrid();
         }
 
 
@@ -764,14 +957,8 @@ void updateGUI()
         {
             ImGui::Text("Rotate the camera by holding left mouse button while moving the mouse");
             ImGui::Text("Select an atom with right click");
-            ImGui::Text("P: Switch between proteins");
-            ImGui::Text("O: Switch between atoms");
-            ImGui::Text("W: Move selected protein up");
-            ImGui::Text("A: Move selected protein left");
-            ImGui::Text("S: Move selected protein down");
-            ImGui::Text("D: Move selected protein right");
-            ImGui::Text("Q: Move selected protein back");
-            ImGui::Text("E: Move selected protein forth");
+            ImGui::Text("T: Translate selected protein");
+            ImGui::Text("R: Rotate selected protein");
             ImGui::EndMenu();
         }
 
@@ -792,6 +979,21 @@ void updateGUI()
             ImGui::Separator();
             std::string atomText = "Total number of atoms: " + std::to_string(m_proteinLoader.getNumberOfAllAtoms());
             ImGui::Text(atomText.c_str());
+            std::string drawSelectedProteinText = "Draw only selected Protein";
+            ImGui::Checkbox(drawSelectedProteinText.c_str(), &m_drawSelectedProtein);
+
+            ImGui::EndMenu();
+        }
+
+        /*
+         * Neighborhood search
+         */
+        if (ImGui::BeginMenu("NeighborhoodSearch"))
+        {
+            std::string isGridVisibleText = "Grid visible";
+            ImGui::Checkbox(isGridVisibleText.c_str() ,&m_isGridVisible);
+            std::string searchRadiusSize = "Suchradius in Angström";
+            ImGui::SliderFloat(searchRadiusSize.c_str(), &m_searchRadius, 0.1, 10.0);
             ImGui::EndMenu();
         }
 
@@ -882,10 +1084,8 @@ int main()
      * setup neighborhood search
      */
     glm::fvec3 min, max;
-    glm::vec3 gridResolution = glm::vec3(10,10,10);
-    float searchRadius = 10.;
     m_proteinLoader.getCenteredBoundingBoxAroundProteins(min, max);
-    m_search.init(m_proteinLoader.getNumberOfAllAtoms(),min,max,gridResolution,searchRadius);
+    m_search.init(m_proteinLoader.getNumberOfAllAtoms(),min,max,m_gridResolution,m_searchRadius);
 
     /*
      * setup buffers

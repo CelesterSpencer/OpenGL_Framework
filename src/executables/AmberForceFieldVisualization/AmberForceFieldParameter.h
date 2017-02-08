@@ -109,32 +109,43 @@ public:
         if (valuesListIndex == 0)
         {
             m_valuesList.push_back(entry);
-            uint insertedIndex = m_valuesList.size(); // caution actual index is (inserted index - 1) since its 1 based
+            uint insertedIndex = m_valuesList.size();
+
+            if (insertedIndex == 0)
+            {
+                return 1;
+            }
 
             // assign inserted index to all possible cells within the cube
             switch(numberOfZeros)
             {
+                case 0:
+                    // case: all indices are used
+                    updateCubeIndex(insertedIndex,x,y,z,w);
+                    break;
                 case 1:
+                    // case: index for dimensions w is missing
+                    updateCubeIndex(insertedIndex,x,y,z);
+                    break;
+                case 2:
+                    // case: index for dimensions z and w are missing
+                    updateCubeIndex(insertedIndex,x,y);
+                    break;
+                case 3:
+                    // case: index for either x or y is present, the rest is missing
                     if (x != 0)
                         updateCubeIndex(insertedIndex,x);
                     else
                         updateCubeIndexY(insertedIndex,y);
                     break;
-                case 2:
-                    updateCubeIndex(insertedIndex,x,y);
-                    break;
-                case 3:
-                    updateCubeIndex(insertedIndex,x,y,z);
-                    break;
                 case 4:
-                    updateCubeIndex(insertedIndex,x,y,z,w);
-                    break;
+                    // case: all indices are missing
+                    Logger::instance().print("Inserting Parameter with 4 zeros indices", Logger::ERROR);
             }
 
             return -1;
         }
-            // else get the index and change the value in the array
-        else
+        else // else get the index and change the value in the array
         {
             m_valuesList.at(valuesListIndex-1) = entry;
         }

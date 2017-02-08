@@ -45,21 +45,23 @@ void AmberForceFieldParameterLoader::load(std::string & filename, AmberForceFiel
 
             // fill atom symbol map
             atomSymbolsMap[tokens[0]] = atomSymbolIndex++;
-            //Logger::instance().print("Element symbol: " + tokens[0]);
+            Logger::instance().print(tokens[0] + ": " + std::to_string(atomSymbolsMap[tokens[0]]));
         }
 
         // skip list of atom symbols that are hydrophilic in solution
         getline(file, line);
 
         // initialize amber Parameters with number of atom symbols as side length of the 4D cube
-        amberParameters = AmberForceFieldParameter(atomSymbolsMap, atomSymbolIndex+1); // index+1 because cube is 1-based
+        int cubeSide = atomSymbolIndex; // cubeSize is number of atom symbols+1 because cube is 1-based
+        Logger::instance().print("Cube size: " + std::to_string(cubeSide));
+        amberParameters = AmberForceFieldParameter(atomSymbolsMap, cubeSide);
 
         // set all atom properties
         for (uint i = 0; i < atomValues.size(); i++)
         {
             // insert properties into 4D cube
-            uint x = atomSymbolsMap[atomSymbols.at(i)];
-            uint status = amberParameters.set(atomValues.at(i), x+1 , 0, 0, 0);    // x+1 because cube is 1-based
+            uint x = atomSymbolsMap[atomSymbols.at(i)]+1; // x+1 because cube is 1-based
+            uint status = amberParameters.set(atomValues.at(i), x , 0, 0, 0);
             if (status == 1)
                 std::cerr << "Wrong insertion, values array index is non null! For x=" << x << std::endl;
         }
@@ -79,7 +81,7 @@ void AmberForceFieldParameterLoader::load(std::string & filename, AmberForceFiel
 
             // parse properties
             bondProperties.x = std::stod(tokens[2]); // bond force constant
-            bondProperties.y = std::stod(tokens[3]);   // bond equilibrium
+            bondProperties.y = std::stod(tokens[3]);  // bond equilibrium
             bondProperties.z = 0;
             bondProperties.w = 0;
 

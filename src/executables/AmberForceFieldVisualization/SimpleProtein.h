@@ -66,11 +66,13 @@ public:
     void applyRotationMatrix(glm::mat4 mat)
     {
         rotationMatrix = mat * rotationMatrix;
+        recalculateBB();
     }
 
     void applyTranslationMatrix(glm::mat4 mat)
     {
         translationMatrix = mat * translationMatrix;
+        recalculateBB();
     }
 
     glm::vec3 getCenterOfGravity()
@@ -100,13 +102,14 @@ public:
             bbMax = glm::vec3(FLOAT_MIN, FLOAT_MIN, FLOAT_MIN);
             for (int i = 0; i < atoms.size(); i++) {
                 SimpleAtom atom = atoms.at(i);
-                glm::vec4 transformedPos = rotationMatrix * translationMatrix * glm::vec4(atom.pos, 1.0);
-                bbMin.x = glm::min(bbMin.x, transformedPos.x);
-                bbMin.y = glm::min(bbMin.y, transformedPos.y);
-                bbMin.z = glm::min(bbMin.z, transformedPos.z);
-                bbMax.x = glm::max(bbMax.x, transformedPos.x);
-                bbMax.y = glm::max(bbMax.y, transformedPos.y);
-                bbMax.z = glm::max(bbMax.z, transformedPos.z);
+                float radius = atom.radius;
+                glm::vec4 transformedPos =  translationMatrix * rotationMatrix * glm::vec4(atom.pos, 1.0);
+                bbMin.x = glm::min(bbMin.x, transformedPos.x-atom.radius);
+                bbMin.y = glm::min(bbMin.y, transformedPos.y-atom.radius);
+                bbMin.z = glm::min(bbMin.z, transformedPos.z-atom.radius);
+                bbMax.x = glm::max(bbMax.x, transformedPos.x+atom.radius);
+                bbMax.y = glm::max(bbMax.y, transformedPos.y+atom.radius);
+                bbMax.z = glm::max(bbMax.z, transformedPos.z+atom.radius);
             }
         } else {
             Logger::instance().print("No atoms to recalculate BB!", Logger::Mode::WARNING);

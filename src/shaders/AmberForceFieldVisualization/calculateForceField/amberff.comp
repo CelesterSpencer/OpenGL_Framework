@@ -39,8 +39,9 @@ uniform float searchRadius2; // radius^2
 uniform int gridAdjCnt;
 uniform int searchCellOff;
 uniform int gridAdj[216];
-
+uniform int selectedAtomID;
 uniform bool useSimplifiedCalculation;
+uniform bool useNeighborhood;
 
 int getIndex(int x, int y, int z, int w) {
     return x + y*numAtomSymbols + z*numAtomSymbols*numAtomSymbols + w*numAtomSymbols*numAtomSymbols*numAtomSymbols;
@@ -57,14 +58,17 @@ vec3 getTransform(in AtomStruct a)
     return vec3(modelMatrix[int(a.proteinID)] * vec4(a.center, 1.0));
 }
 
-void calcBond(
+int calcBond(
     in AtomStruct a1,
     in AtomStruct a2,
     in int isI,
     in int isJ,
     inout vec3 resDir)
 {
-    vec4 entry = valuesVector[indexCube[getIndex(int(a1.atomSymbolIndex), int(a2.atomSymbolIndex), 0, 0)]];
+    uint entryIdx = indexCube[getIndex(int(a1.atomSymbolIndex), int(a2.atomSymbolIndex), 0, 0)];
+    int status = (entryIdx == 0) ? 0 : 1;
+
+    vec4 entry = valuesVector[entryIdx-1];
     float k = entry.x;
     float r0 = entry.y;
 
@@ -74,14 +78,19 @@ void calcBond(
     vec3 f2 = -f1;
 
     resDir = resDir + (isI*f1) + (isJ*f2);
+
+    return status;
 }
 
-void calcBondSimple(
+int calcBondSimple(
     in AtomStruct a1,
     in AtomStruct a2,
     inout vec3 resDir)
 {
-    vec4 entry = valuesVector[indexCube[getIndex(int(a1.atomSymbolIndex), int(a2.atomSymbolIndex), 0, 0)]];
+    uint entryIdx = indexCube[getIndex(int(a1.atomSymbolIndex), int(a2.atomSymbolIndex), 0, 0)];
+    int status = (entryIdx == 0) ? 0 : 1;
+
+    vec4 entry = valuesVector[entryIdx-1];
     float r0 = entry.y;
 
     vec3 dir = getTransform(a2) - getTransform(a1);
@@ -90,17 +99,26 @@ void calcBondSimple(
     float halfDiff = (r-r0) / 2.0;
 
     resDir = resDir + (dir*halfDiff);
+
+    return status;
 }
 
-void calcVdW(
+int calcVdW(
     in AtomStruct a1,
     in AtomStruct a2,
     in int isI,
     in int isJ,
     inout vec3 resDir)
 {
-    vec4 entry1 = valuesVector[indexCube[getIndex(0, int(a1.atomSymbolIndex), 0, 0)]];
-    vec4 entry2 = valuesVector[indexCube[getIndex(0, int(a2.atomSymbolIndex), 0, 0)]];
+    uint entry1Idx = indexCube[getIndex(0, int(a1.atomSymbolIndex), 0, 0)];
+    uint entry2Idx = indexCube[getIndex(0, int(a2.atomSymbolIndex), 0, 0)];
+    int status = (entry1Idx == 0) ? 0 : 1;
+    status *= (entry2Idx == 0) ? 0 : 1;
+
+
+
+    vec4 entry1 = valuesVector[entry1Idx-1];
+    vec4 entry2 = valuesVector[entry2Idx-1];
     float sigma = entry1.x + entry2.x;
     float epsilon = sqrt(entry1.y * entry2.y);
     vec3 r = getTransform(a2) - getTransform(a1);
@@ -110,9 +128,13 @@ void calcVdW(
     vec3 f2 = -f1;
 
     resDir = resDir + (isI*f1) + (isJ*f2);
+
+
+
+    return status;
 }
 
-void calcAngle(
+int calcAngle(
     in AtomStruct a1,
     in AtomStruct a2,
     in AtomStruct a3,
@@ -121,7 +143,12 @@ void calcAngle(
     in int isK,
     inout vec3 resDir)
 {
-    vec4 entry = valuesVector[indexCube[getIndex(int(a1.atomSymbolIndex), int(a2.atomSymbolIndex), int(a3.atomSymbolIndex), 0)]];
+    uint entryIdx = indexCube[getIndex(int(a1.atomSymbolIndex), int(a2.atomSymbolIndex), int(a3.atomSymbolIndex), 0)];
+    int status = (entryIdx == 0) ? 0 : 1;
+
+
+
+    vec4 entry = valuesVector[entryIdx-1];
     float k = entry.x;
     float a0 = entry.y;
 
@@ -134,10 +161,14 @@ void calcAngle(
     vec3 f2 = -f1 -f3;
 
     resDir = resDir + (isI*f1) + (isJ*f2) + (isK*f3);
+
+
+
+    return status;
 }
 
 
-void calcAngleSimple(
+int calcAngleSimple(
     in AtomStruct a1,
     in AtomStruct a2,
     in AtomStruct a3,
@@ -145,7 +176,12 @@ void calcAngleSimple(
     in int isJ,
     inout vec3 resDir)
 {
-    vec4 entry = valuesVector[indexCube[getIndex(int(a1.atomSymbolIndex), int(a2.atomSymbolIndex), int(a3.atomSymbolIndex), 0)]];
+    uint entryIdx = indexCube[getIndex(int(a1.atomSymbolIndex), int(a2.atomSymbolIndex), int(a3.atomSymbolIndex), 0)];
+    int status = (entryIdx == 0) ? 0 : 1;
+
+
+
+    vec4 entry = valuesVector[entryIdx-1];
     float a0 = entry.y;
 
     vec3 v1 = getTransform(a1) - getTransform(a2);
@@ -160,9 +196,13 @@ void calcAngleSimple(
     vec3 f2 = vec3(0.0,0.0,0.0);
 
     resDir = resDir + (isI*f1) + (isJ*f2);
+
+
+
+    return status;
 }
 
-void calcDihedral(
+int calcDihedral(
     in AtomStruct a1,
     in AtomStruct a2,
     in AtomStruct a3,
@@ -173,46 +213,52 @@ void calcDihedral(
     in int isL,
     inout vec3 resDir)
 {
-    vec4 entry = valuesVector[indexCube[getIndex(int(a1.atomSymbolIndex), int(a2.atomSymbolIndex), int(a3.atomSymbolIndex), int(a4.atomSymbolIndex))]];
+    uint entryIdx = indexCube[getIndex(int(a1.atomSymbolIndex), int(a2.atomSymbolIndex), int(a3.atomSymbolIndex), int(a4.atomSymbolIndex))];
+    int status = (entryIdx == 0) ? 0 : 1;
+
+
+
+    vec4 entry = valuesVector[entryIdx-1];
     float k = entry.x;
     float n = entry.w;
     float delta = entry.z;
 
-    if (!(isnan(k) || isinf(k) || isnan(n) || isinf(n) || isnan(delta) || isinf(delta))) // CHECK IF ENTRY IS INVALID
-    {
-        vec3 r1 = getTransform(a2) - getTransform(a1);
-        vec3 r2 = getTransform(a3) - getTransform(a2);
-        vec3 r3 = getTransform(a4) - getTransform(a3);
+    vec3 r1 = getTransform(a2) - getTransform(a1);
+    vec3 r2 = getTransform(a3) - getTransform(a2);
+    vec3 r3 = getTransform(a4) - getTransform(a3);
 
-        vec3 a = cross(r1,r2);
-        vec3 b = cross(r2,r3);
-        vec3 c = cross(r2,a);
+    vec3 a = cross(r1,r2);
+    vec3 b = cross(r2,r3);
+    vec3 c = cross(r2,a);
 
-        // prevent dividing by 0, to set length to a small epsilon when it would be 0
-        float lenA  = max(length(a), EPSILON);
-        float lenB  = max(length(b), EPSILON);
-        float lenC  = max(length(c), EPSILON);
-        float lenAB = max(lenA*lenB, EPSILON);
-        float lenBC = max(lenB*lenC, EPSILON);
+    // prevent dividing by 0, to set length to a small epsilon when it would be 0
+    float lenA  = max(length(a), EPSILON);
+    float lenB  = max(length(b), EPSILON);
+    float lenC  = max(length(c), EPSILON);
+    float lenAB = max(lenA*lenB, EPSILON);
+    float lenBC = max(lenB*lenC, EPSILON);
 
-        float cosa = dot(a,b) / (lenAB);
-        float sina = dot(c,b) / (lenBC);
-        float alpha = atan(sina, cosa);
+    float cosa = dot(a,b) / (lenAB);
+    float sina = dot(c,b) / (lenBC);
+    float alpha = atan(sina, cosa);
 
-        vec3 ds  = (b - (cosa * a)) / lenA;
-        vec3 db  = (a - (cosa * b)) / lenB;
-        float mu = -k * n * sin(n*alpha - delta) / sina;
+    vec3 ds  = (b - (cosa * a)) / lenA;
+    vec3 db  = (a - (cosa * b)) / lenB;
+    float mu = -k * n * sin(n*alpha - delta) / sina;
 
-        vec3 f1 = -mu * cross(r2,ds);
-        vec3 f2 =  mu * (cross(r2,ds) - cross(db,r2));
-        vec3 f3 =  mu * (cross(db,r2) - cross(ds,r1) - cross(r3,db));
-        vec3 f4 =  mu * (cross(ds,r1) + cross(r3,db));
+    vec3 f1 = -mu * cross(r2,ds);
+    vec3 f2 =  mu * (cross(r2,ds) - cross(db,r2));
+    vec3 f3 =  mu * (cross(db,r2) - cross(ds,r1) - cross(r3,db));
+    vec3 f4 =  mu * (cross(ds,r1) + cross(r3,db));
 
-        resDir = resDir + (isI*f1) + (isJ*f2) + (isK*f3) + (isL*f4);
-    }
+    resDir = resDir + (isI*f1) + (isJ*f2) + (isK*f3) + (isL*f4);
+
+
+
+    return status;
 }
 
-void calcDihedralSimple(
+int calcDihedralSimple(
     in AtomStruct a1,
     in AtomStruct a2,
     in AtomStruct a3,
@@ -221,7 +267,12 @@ void calcDihedralSimple(
     in int isJ,
     inout vec3 resDir)
 {
-    vec4 entry = valuesVector[indexCube[getIndex(int(a1.atomSymbolIndex), int(a2.atomSymbolIndex), int(a3.atomSymbolIndex), int(a4.atomSymbolIndex))]];
+    uint entryIdx = indexCube[getIndex(int(a1.atomSymbolIndex), int(a2.atomSymbolIndex), int(a3.atomSymbolIndex), int(a4.atomSymbolIndex))];
+    int status = (entryIdx == 0) ? 0 : 1;
+
+
+
+    vec4 entry = valuesVector[entryIdx-1];
     float theta = entry.z;
 
     vec3 v1 = getTransform(a1) - getTransform(a2);
@@ -254,9 +305,13 @@ void calcDihedralSimple(
     vec3 f2 = vec3(0.0, 0.0, 0.0);
 
     resDir = resDir + (isI*f1) + (isJ*f2);
+
+
+
+    return status;
 }
 
-void calcImpropers(
+int calcImpropers(
     in AtomStruct a1,
     in AtomStruct a2,
     in AtomStruct a3,
@@ -267,7 +322,12 @@ void calcImpropers(
     in int isL,
     inout vec3 resDir)
 {
-    vec4 entry = valuesVector[indexCube[getIndex(int(a1.atomSymbolIndex), int(a2.atomSymbolIndex), int(a3.atomSymbolIndex), int(a4.atomSymbolIndex))]];
+    uint entryIdx = indexCube[getIndex(int(a1.atomSymbolIndex), int(a2.atomSymbolIndex), int(a3.atomSymbolIndex), int(a4.atomSymbolIndex))];
+    int status = (entryIdx == 0) ? 0 : 1;
+
+
+
+    vec4 entry = valuesVector[entryIdx-1];
     float s0 = entry.z;
     float k  = entry.y;
     float n  = entry.w;
@@ -305,9 +365,13 @@ void calcImpropers(
     vec3 f4 =  mu * (cross(ds,r1) + cross(r3,db));
 
     resDir = resDir + (isI*f1) + (isJ*f2) + (isK*f3) + (isL*f4);
+
+
+
+    return status;
 }
 
-void calcImpropersSimple(
+int calcImpropersSimple(
     in AtomStruct a1,
     in AtomStruct a2,
     in AtomStruct a3,
@@ -316,7 +380,12 @@ void calcImpropersSimple(
     in int isL,
     inout vec3 resDir)
 {
-    vec4 entry = valuesVector[indexCube[getIndex(int(a1.atomSymbolIndex), int(a2.atomSymbolIndex), int(a3.atomSymbolIndex), int(a4.atomSymbolIndex))]];
+    uint entryIdx = indexCube[getIndex(int(a1.atomSymbolIndex), int(a2.atomSymbolIndex), int(a3.atomSymbolIndex), int(a4.atomSymbolIndex))];
+    int status = (entryIdx == 0) ? 0 : 1;
+
+
+
+    vec4 entry = valuesVector[entryIdx-1];
     float theta = entry.z;
 
     vec3 v1 = getTransform(a2) - getTransform(a4);
@@ -353,6 +422,10 @@ void calcImpropersSimple(
     vec3 f2 = vec3(0.0, 0.0, 0.0);
 
     resDir = resDir + (isI*f1) + (isL*f2);
+
+
+
+    return status;
 }
 
 int getClosestAtomIdx(int idx, vec3 pos, int proteinID)
@@ -407,6 +480,15 @@ int getClosestAtomIdx(int idx, vec3 pos, int proteinID)
 }
 
 void main() {
+    /*
+     * status of the calculation
+     * if it gets 0 an error has occured
+     * while calculating the force
+     */
+    int status = 1;
+
+
+
     // get element index
     int curAtomIdx = int(gl_GlobalInvocationID.x);
     if(curAtomIdx > numAtoms) return;
@@ -426,13 +508,13 @@ void main() {
         AtomStruct neighborAtom = atoms[neighbors[neighborsStart+i]];
         if (useSimplifiedCalculation)
         {
-            calcBondSimple(curAtom, neighborAtom, resultDir);
-            calcVdW(curAtom, neighborAtom, 1, 0, resultDir);
+            status *= calcBondSimple(curAtom, neighborAtom, resultDir);
+            status *= calcVdW(curAtom, neighborAtom, 1, 0, resultDir);
         }
         else
         {
-            calcBond(curAtom, neighborAtom, 1, 0, resultDir);
-            calcVdW(curAtom, neighborAtom, 1, 0, resultDir);
+            status *= calcBond(curAtom, neighborAtom, 1, 0, resultDir);
+            status *= calcVdW(curAtom, neighborAtom, 1, 0, resultDir);
         }
 
     }
@@ -449,11 +531,11 @@ void main() {
             AtomStruct neighborAtom2 = atoms[neighbors[neighborsStart+j]];
             if (useSimplifiedCalculation)
             {
-                calcAngleSimple(neighborAtom1, curAtom, neighborAtom2, 0, 1, resultDir);
+                status *= calcAngleSimple(neighborAtom1, curAtom, neighborAtom2, 0, 1, resultDir);
             }
             else
             {
-                calcAngle(neighborAtom1, curAtom, neighborAtom2, 0, 1, 0, resultDir);
+                status *= calcAngle(neighborAtom1, curAtom, neighborAtom2, 0, 1, 0, resultDir);
             }
         }
     }
@@ -472,11 +554,11 @@ void main() {
             AtomStruct neighborAtom2 = atoms[neighborAtom2Idx];
             if (useSimplifiedCalculation)
             {
-                calcAngleSimple(curAtom, neighborAtom1, neighborAtom2, 1, 0, resultDir);
+                status *= calcAngleSimple(curAtom, neighborAtom1, neighborAtom2, 1, 0, resultDir);
             }
             else
             {
-                calcAngle(curAtom, neighborAtom1, neighborAtom2, 1, 0, 0, resultDir);
+                status *= calcAngle(curAtom, neighborAtom1, neighborAtom2, 1, 0, 0, resultDir);
             }
         }
     }
@@ -510,11 +592,11 @@ void main() {
                 AtomStruct neighborAtom3 = atoms[neighborAtom3Idx];
                 if (useSimplifiedCalculation)
                 {
-                    calcDihedralSimple(curAtom, neighborAtom1, neighborAtom2, neighborAtom3, 1, 0, resultDir);
+                    status *= calcDihedralSimple(curAtom, neighborAtom1, neighborAtom2, neighborAtom3, 1, 0, resultDir);
                 }
                 else
                 {
-                    calcDihedral(curAtom, neighborAtom1, neighborAtom2, neighborAtom3, 1, 0, 0, 0, resultDir);
+                    status *= calcDihedral(curAtom, neighborAtom1, neighborAtom2, neighborAtom3, 1, 0, 0, 0, resultDir);
                 }
             }
         }
@@ -543,11 +625,11 @@ void main() {
                 AtomStruct neighborAtom3 = atoms[neighborAtom3Idx];
                 if (useSimplifiedCalculation)
                 {
-                    calcDihedralSimple(neighborAtom3, curAtom, neighborAtom2, neighborAtom1, 0, 1, resultDir);
+                    status *= calcDihedralSimple(neighborAtom3, curAtom, neighborAtom2, neighborAtom1, 0, 1, resultDir);
                 }
                 else
                 {
-                    calcDihedral(neighborAtom1, neighborAtom2, curAtom, neighborAtom3, 0, 0, 1, 0, resultDir);
+                    status *= calcDihedral(neighborAtom1, neighborAtom2, curAtom, neighborAtom3, 0, 0, 1, 0, resultDir);
                 }
             }
         }
@@ -577,11 +659,11 @@ void main() {
                     AtomStruct neighborAtom3 = atoms[neighbors[neighborsStart+k]];
                     if (useSimplifiedCalculation)
                     {
-                        calcImpropersSimple(neighborAtom1, neighborAtom2, neighborAtom3, curAtom, 0, 1, resultDir);
+                        status *= calcImpropersSimple(neighborAtom1, neighborAtom2, neighborAtom3, curAtom, 0, 1, resultDir);
                     }
                     else
                     {
-                        calcImpropers(neighborAtom1, neighborAtom2, neighborAtom3, curAtom, 0, 0, 0, 1, resultDir);
+                        status *= calcImpropers(neighborAtom1, neighborAtom2, neighborAtom3, curAtom, 0, 0, 0, 1, resultDir);
                     }
                 }
             }
@@ -621,11 +703,11 @@ void main() {
                 AtomStruct neighborAtom3 = atoms[neighborAtom3Idx];
                 if (useSimplifiedCalculation)
                 {
-                    calcImpropersSimple(curAtom, neighborAtom2, neighborAtom3, neighborAtom1, 1, 0, resultDir);
+                    status *= calcImpropersSimple(curAtom, neighborAtom2, neighborAtom3, neighborAtom1, 1, 0, resultDir);
                 }
                 else
                 {
-                    calcImpropers(curAtom, neighborAtom2, neighborAtom3, neighborAtom1, 1, 0, 0, 0, resultDir);
+                    status *= calcImpropers(curAtom, neighborAtom2, neighborAtom3, neighborAtom1, 1, 0, 0, 0, resultDir);
                 }
             }
         }
@@ -641,9 +723,13 @@ void main() {
      * charge to red. For all other directions interpolate between green and red.
      */
     int closestAtomIdx = getClosestAtomIdx(curAtomIdx, getTransform(curAtom), int(curAtom.proteinID));
-    if (closestAtomIdx < 0 || closestAtomIdx >= numAtoms)
+    if (curAtomIdx == selectedAtomID)
     {
-        atoms[curAtomIdx].charge = vec4(1.0, 1.0, 1.0, 0.0);
+        atoms[curAtomIdx].charge = vec4(1.0, 1.0, 1.0, 1.0);
+    }
+    else if (closestAtomIdx < 0 || closestAtomIdx >= numAtoms)
+    {
+        atoms[curAtomIdx].charge = vec4(0.0, 0.0, 0.0, 0.0);
     }
     else
     {

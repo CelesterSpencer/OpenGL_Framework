@@ -19,6 +19,8 @@ uniform mat4 view;
 uniform mat4 projection;
 uniform vec3 cameraWorldPos;
 uniform vec3 lightDir;
+uniform int selectedProtein;
+uniform bool drawSelectedProteinOnly;
 
 void main()
 {
@@ -28,7 +30,7 @@ void main()
      * render only sphere on the triangle billboard
      */
     float distance = length(uv);
-    if(distance > 1.0)
+    if(distance > 1.0 || (drawSelectedProteinOnly && selectedProtein != int(proteinID)))
     {
         discard;
     }
@@ -75,12 +77,13 @@ void main()
     vec3 finalColor = mix(proteinColor[int(proteinID)].xyz * mix(ambientColor, vec3(1.0, 1.0, 1.0), lighting), vec3(1.0, 1.0, 1.0), specular);
 
     // Output color
+    float alpha = (selectedProtein < 0 || selectedProtein == int(proteinID)) ? 1.0 : 0.1;
     if (distance > 0.8 && color.w != 0.0)
     {
-        outColor = color;
+        outColor = vec4(color.xyz, alpha);
     }
     else
     {
-        outColor = vec4(finalColor, 1.0);
+        outColor = vec4(finalColor, alpha);
     }
 }
