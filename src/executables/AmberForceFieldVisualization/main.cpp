@@ -239,6 +239,46 @@ void keyCallback(int key, int scancode, int action, int mods)
         m_resetStartMousePosition = true;
         m_interactionMode = 2; // set interaction mode to ROTATE
     }
+
+    /*
+     * camera interaction
+     */
+    if (key == GLFW_KEY_KP_4 && action == GLFW_PRESS)
+    {
+        mp_camera->setAlpha(180.0);
+        mp_camera->setBeta(90.0);
+        mp_camera->update(WIDTH, HEIGHT, true);
+    }
+    if (key == GLFW_KEY_KP_5 && action == GLFW_PRESS)
+    {
+        mp_camera->setAlpha(90.0);
+        mp_camera->setBeta(90.0);
+        mp_camera->update(WIDTH, HEIGHT, true);
+    }
+    if (key == GLFW_KEY_KP_6 && action == GLFW_PRESS)
+    {
+        mp_camera->setAlpha(0.0);
+        mp_camera->setBeta(90.0);
+        mp_camera->update(WIDTH, HEIGHT, true);
+    }
+    if (key == GLFW_KEY_KP_8 && action == GLFW_PRESS)
+    {
+        mp_camera->setAlpha(90.0);
+        mp_camera->setBeta(0.0);
+        mp_camera->update(WIDTH, HEIGHT, true);
+    }
+    if (key == GLFW_KEY_KP_2 && action == GLFW_PRESS)
+    {
+        mp_camera->setAlpha(90.0);
+        mp_camera->setBeta(180.0);
+        mp_camera->update(WIDTH, HEIGHT, true);
+    }
+    if (key == GLFW_KEY_KP_0 && action == GLFW_PRESS)
+    {
+        mp_camera->setAlpha(270.0);
+        mp_camera->setBeta(90.0);
+        mp_camera->update(WIDTH, HEIGHT, true);
+    }
 }
 
 void mouseButtonCallback(int button, int action, int mods)
@@ -384,7 +424,7 @@ void drawGizmo()
     glm::vec4 proteinCenterOfGravityProjected = mp_camera->getProjectionMatrix() * proteinCenterOfGravityCameraSpace;
     glm::vec2 proteinCenterOfGravity2D;
     proteinCenterOfGravity2D.x = round(((proteinCenterOfGravityProjected.x/proteinCenterOfGravityProjected.w+1) /2.0) * WIDTH);
-    proteinCenterOfGravity2D.y = HEIGHT - round(((proteinCenterOfGravityProjected.y/proteinCenterOfGravityProjected.w+1) /2.0) * HEIGHT);
+    proteinCenterOfGravity2D.y = round(((proteinCenterOfGravityProjected.y/proteinCenterOfGravityProjected.w+1) /2.0) * HEIGHT);
     float proteinCenterOfGravityDepth = proteinCenterOfGravityProjected.z / proteinCenterOfGravityProjected.w;
 
     // reset mouse position if necessary
@@ -498,7 +538,9 @@ void drawGizmo()
         glm::vec2 v2 = m_currentMousePosition - proteinCenterOfGravity2D;
         v2 = glm::normalize(v2);
 
+        Logger::instance().print(glm::to_string(proteinCenterOfGravity2D) + " " + glm::to_string(m_currentMousePosition));
         float angle = glm::orientedAngle(v1, v2); // * 180 / M_PI;
+        Logger::instance().print(std::to_string(angle*180/M_PI));
 
         m_tempModelMatrix = glm::rotate(angle, mp_camera->getPosition() - mp_camera->getCenter());
     }
